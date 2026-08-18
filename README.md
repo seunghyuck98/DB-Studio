@@ -259,6 +259,33 @@ src/
 DB 접근은 전부 메인 프로세스에서 일어나고, 렌더러는 `contextIsolation` 아래에서 IPC 로만 통신한다.
 접속마다 전용 커넥션 하나를 유지하므로 트랜잭션이 SQL 편집기와 데이터 그리드에 걸쳐 이어진다.
 
+## 설정 파일 위치
+
+접속 정보와 쿼리 히스토리는 OS 사용자 폴더에 저장된다. 앱 이름을 `DB Studio` 로 고정해 두었으므로
+**소스로 실행하든 설치본으로 실행하든 같은 설정을 쓴다.**
+
+| OS | 경로 |
+| --- | --- |
+| macOS | `~/Library/Application Support/DB Studio/` |
+| Windows | `%APPDATA%\DB Studio\` |
+| Linux | `~/.config/DB Studio/` |
+
+예전 소스 실행은 `dbstudio` 폴더를 썼다. 처음 실행할 때 `connections.json` 과 `query-history.json` 을
+새 폴더로 한 번 복사해 온다 (원본은 그대로 남는다).
+
+비밀번호는 OS 키체인으로 암호화되어 있어 파일만 복사해도 다른 사용자 계정에서는 풀리지 않는다.
+
+## 아이콘
+
+`build/icon.png` (1024×1024) 하나로 모든 플랫폼 아이콘을 만든다.
+
+- **설치본** — electron-builder 가 `icon.icns` / `icon.ico` 로 변환해 번들에 넣는다.
+- **소스 실행** — 번들 아이콘이 없어 Electron 기본 아이콘이 뜨므로,
+  `main.js` 가 macOS 는 `app.dock.setIcon()`, Windows·Linux 는 창의 `icon` 옵션으로 직접 지정한다.
+
+아이콘을 바꾸려면 `scripts/make-icon.js` 를 고치고 `npm run icons` 를 실행한다.
+직접 만든 PNG 로 갈아 끼워도 된다 (1024×1024 권장).
+
 ## 아직 없는 것
 
 - Oracle / SQL Server 드라이버 (`electron/db/` 에 드라이버를 추가하고 `DRIVERS` 에 등록하면 된다)

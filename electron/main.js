@@ -1,25 +1,71 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, nativeImage } = require('electron');
+
+const isDev = process.env.NODE_ENV === 'development';
+const DEV_URL = 'http://localhost:5273';
+const APP_NAME = 'DB Studio';
+
+// 설정 폴더 이름은 앱 이름에서 나온다.
+// 소스로 실행할 때(package.json 의 name)와 설치본(productName)이 달라지지 않게 여기서 못 박는다.
+// db/store/history 모듈이 경로를 읽기 전에 정해져야 하므로 require 보다 먼저 호출한다.
+app.setName(APP_NAME);
+migrateUserData();
 
 const db = require('./db');
 const store = require('./store');
 const exporter = require('./export');
 const history = require('./history');
 
-const isDev = process.env.NODE_ENV === 'development';
-const DEV_URL = 'http://localhost:5273';
-
 let mainWindow = null;
 
+/**
+ * 예전 소스 실행은 설정을 'dbstudio' 폴더에 남겼다.
+ * 앱 이름을 통일하면서 폴더가 바뀌므로, 접속 정보와 히스토리를 한 번 옮겨 온다.
+ */
+function migrateUserData() {
+  try {
+    const target = app.getPath('userData');
+    const legacy = path.join(path.dirname(target), 'dbstudio');
+    if (legacy === target || !fs.existsSync(legacy)) return;
+    for (const name of ['connections.json', 'query-history.json']) {
+      const from = path.join(legacy, name);
+      const to = path.join(target, name);
+      if (fs.existsSync(from) && !fs.existsSync(to)) {
+        fs.mkdirSync(target, { recursive: true });
+        fs.copyFileSync(from, to);
+      }
+    }
+  } catch (_) {
+    /* 이전 설정을 못 옮겨도 앱은 정상 동작해야 한다 */
+  }
+}
+
+/**
+ * 창·Dock 아이콘.
+ * 설치본은 번들 아이콘(icon.icns/ico)을 쓰지만, 소스로 실행하면 그게 없어
+ * Electron 기본 아이콘이 뜬다. 그때 build/icon.png 를 직접 지정해 준다.
+ */
+function appIcon() {
+  const file = path.join(__dirname, '..', 'build', 'icon.png');
+  if (!fs.existsSync(file)) return null;
+  const image = nativeImage.createFromPath(file);
+  return image.isEmpty() ? null : image;
+}
+
 function createWindow() {
+  const icon = appIcon();
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 980,
     minHeight: 600,
+    title: APP_NAME,
     backgroundColor: '#1e1f22',
+    // Windows·Linux 는 창 아이콘을 여기서 받는다 (macOS 는 Dock 쪽에서 지정).
+    ...(icon ? { icon } : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -149,6 +195,13 @@ handle('tx:rollback', (id) => db.rollback(id));
 
 app.whenReady().then(() => {
   // 배포 빌드의 CSP 는 dist/index.html 의 메타 태그로 들어간다 (vite.config.ts 의 csp-on-build).
+
+  // macOS 는 Dock 아이콘을 창 옵션으로 바꿀 수 없어 따로 지정한다.
+  if (process.platform === 'darwin' && app.dock) {
+    const icon = appIcon();
+    if (icon) app.dock.setIcon(icon);
+  }
+
   buildMenu();
   createWindow();
   app.on('activate', () => {
