@@ -5,8 +5,6 @@ MySQL / MariaDB / PostgreSQL 을 지원한다.
 
 ## 설치
 
-**설치파일로 쓰려면** [Releases](../../releases) 에서 받는다.
-
 | OS | 파일 |
 | --- | --- |
 | macOS (Apple Silicon / Intel) | `DB Studio-*-arm64.dmg` / `DB Studio-*.dmg` |
