@@ -1,0 +1,102 @@
+name: Release
+
+# v0.1.0 같은 태그를 밀면 3개 OS 설치파일을 만들어 GitHub Releases 에 올린다.
+# 수동으로 돌리려면 Actions 탭에서 "Run workflow" 를 눌러 태그 이름을 넣는다.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '릴리스로 만들 태그 (예: v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: mac
+            # macOS 러너 하나로 Apple Silicon 과 Intel 용을 함께 만든다.
+            args: --mac --arm64 --x64
+          - os: windows-latest
+            name: win
+            args: --win --x64
+          - os: ubuntu-latest
+            name: linux
+            args: --linux --x64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 렌더러 빌드
+        run: npm run build
+
+      - name: 설치파일 빌드
+        run: npx electron-builder ${{ matrix.args }} --publish never
+        env:
+          # 코드 서명 인증서를 아직 등록하지 않았으므로 자동 탐색을 끈다.
+          # 서명하려면 저장소 시크릿에 CSC_LINK / CSC_KEY_PASSWORD 를 넣고 이 줄을 지운다.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 산출물 모으기
+        shell: bash
+        run: |
+          mkdir -p out
+          # 설치파일만 챙긴다. 압축 해제된 앱 폴더와 중간 산출물은 제외.
+          find release -maxdepth 1 -type f \
+            \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \
+               -o -name '*.AppImage' -o -name '*.deb' -o -name 'latest*.yml' \) \
+            -exec cp {} out/ \;
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          path: out/*
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 파일 확인
+        run: ls -la artifacts
+
+      - name: Releases 에 올리기
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # 같은 태그로 다시 돌리는 경우를 대비해 있으면 파일만 덮어쓴다.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --clobber
+          else
+            gh release create "$TAG" artifacts/* \
+              --title "DB Studio $TAG" \
+              --generate-notes
+          fi

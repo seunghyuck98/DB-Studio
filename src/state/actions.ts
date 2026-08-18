@@ -1,0 +1,229 @@
+import type { ConnectionConfig, DatabaseMeta, SchemaMeta, TableMeta } from '../types';
+import {
+  getState, setState, setNode, setExpanded, setSession, notify,
+  closeTabsOfConnection, type TreeItem,
+} from './store';
+
+const api = () => {
+  if (!window.api) throw new Error('데스크톱 브리지를 사용할 수 없습니다. Electron 앱으로 실행하세요.');
+  return window.api;
+};
+
+export const nodeId = {
+  connection: (c: string) => `conn:${c}`,
+  database: (c: string, d: string) => `db:${c}:${d}`,
+  schema: (c: string, d: string, s: string) => `schema:${c}:${d}:${s}`,
+  table: (c: string, d: string, s: string, t: string) => `table:${c}:${d}:${s}:${t}`,
+};
+
+// ---- 접속 -------------------------------------------------------------------
+
+export async function loadConnections(): Promise<void> {
+  try {
+    setState({ connections: await api().connections.list() });
+  } catch (e) {
+    notify('error', message(e));
+  }
+}
+
+export async function saveConnection(conn: Partial<ConnectionConfig>): Promise<ConnectionConfig | null> {
+  try {
+    const saved = await api().connections.save(conn);
+    await loadConnections();
+    return saved;
+  } catch (e) {
+    notify('error', message(e));
+    return null;
+  }
+}
+
+export async function deleteConnection(id: string): Promise<void> {
+  try {
+    await disconnect(id);
+    await api().connections.remove(id);
+    await loadConnections();
+  } catch (e) {
+    notify('error', message(e));
+  }
+}
+
+export async function connect(conn: ConnectionConfig, password?: string): Promise<boolean> {
+  // 빈 문자열은 "비밀번호 없음"이라는 유효한 입력이므로 미입력(undefined)과 구분한다.
+  if (!conn.hasSavedPassword && password === undefined) {
+    setState({ dialog: { kind: 'password', connection: conn } });
+    return false;
+  }
+  const root = nodeId.connection(conn.id);
+  setNode(root, { loading: true, error: null });
+  try {
+    const status = await api().connections.connect(conn.id, password);
+    setSession(conn.id, status);
+    setNode(root, { loading: false, error: null, children: null });
+    setExpanded(root, true);
+    await loadChildren({ id: root, type: 'connection', label: conn.name, connectionId: conn.id });
+    notify('success', `${conn.name} 에 접속했습니다.`);
+    return true;
+  } catch (e) {
+    setNode(root, { loading: false, error: message(e) });
+    notify('error', `접속 실패: ${message(e)}`);
+    return false;
+  }
+}
+
+export async function disconnect(id: string): Promise<void> {
+  const session = getState().sessions[id];
+  if (session?.txActive) {
+    const ok = window.confirm('커밋되지 않은 트랜잭션이 있습니다. 롤백하고 접속을 끊을까요?');
+    if (!ok) return;
+  }
+  try {
+    await api().connections.disconnect(id);
+  } catch (e) {
+    notify('error', message(e));
+  }
+  closeTabsOfConnection(id);
+  setState((s) => {
+    const sessions = { ...s.sessions };
+    delete sessions[id];
+    const nodes = { ...s.nodes };
+    const expanded = { ...s.expanded };
+    for (const key of Object.keys(nodes)) if (key.includes(`:${id}:`) || key === nodeId.connection(id)) delete nodes[key];
+    for (const key of Object.keys(expanded)) if (key.includes(`:${id}:`) || key === nodeId.connection(id)) delete expanded[key];
+    return { sessions, nodes, expanded };
+  });
+}
+
+// ---- 트리 -------------------------------------------------------------------
+
+export async function toggleNode(item: TreeItem): Promise<void> {
+  const s = getState();
+  const isOpen = !!s.expanded[item.id];
+  setExpanded(item.id, !isOpen);
+  if (!isOpen && !s.nodes[item.id]?.children) await loadChildren(item);
+}
+
+export async function refreshNode(item: TreeItem): Promise<void> {
+  setNode(item.id, { children: null });
+  await loadChildren(item);
+}
+
+export async function loadChildren(item: TreeItem): Promise<void> {
+  const connId = item.connectionId;
+  setNode(item.id, { loading: true, error: null });
+  try {
+    let children: TreeItem[] = [];
+
+    if (item.type === 'connection') {
+      const dbs: DatabaseMeta[] = await api().meta.get(connId, 'databases');
+      children = dbs.map((d) => ({
+        id: nodeId.database(connId, d.name),
+        type: 'database' as const,
+        label: d.name,
+        connectionId: connId,
+        database: d.name,
+        detail: d.charset ?? undefined,
+      }));
+    } else if (item.type === 'database') {
+      const session = getState().sessions[connId];
+      const db = item.database!;
+      if (session?.hasSchemaLevel) {
+        // PostgreSQL 은 접속이 데이터베이스 단위이므로 다른 DB 를 펼치면 재접속한다.
+        if (session.currentDatabase !== db) await switchDatabase(connId, db);
+        const schemas: SchemaMeta[] = await api().meta.get(connId, 'schemas');
+        children = schemas.map((x) => ({
+          id: nodeId.schema(connId, db, x.name),
+          type: 'schema' as const,
+          label: x.name,
+          connectionId: connId,
+          database: db,
+          schema: x.name,
+        }));
+      } else {
+        children = await loadTables(connId, db, db);
+      }
+    } else if (item.type === 'schema') {
+      children = await loadTables(connId, item.database!, item.schema!);
+    }
+
+    setNode(item.id, { loading: false, error: null, children });
+  } catch (e) {
+    setNode(item.id, { loading: false, error: message(e), children: [] });
+  }
+}
+
+async function loadTables(connId: string, database: string, schema: string): Promise<TreeItem[]> {
+  const tables: TableMeta[] = await api().meta.get(connId, 'tables', { schema });
+  return tables.map((t) => ({
+    id: nodeId.table(connId, database, schema, t.name),
+    type: t.kind === 'view' ? ('view' as const) : ('table' as const),
+    label: t.name,
+    connectionId: connId,
+    database,
+    schema,
+    table: t.name,
+    detail: t.comment || undefined,
+  }));
+}
+
+// ---- 스키마 / 데이터베이스 전환 ----------------------------------------------
+
+export async function switchSchema(connectionId: string, schema: string): Promise<void> {
+  try {
+    setSession(connectionId, await api().meta.setSchema(connectionId, schema));
+  } catch (e) {
+    notify('error', message(e));
+  }
+}
+
+export async function switchDatabase(connectionId: string, database: string): Promise<void> {
+  const status = await api().meta.setDatabase(connectionId, database);
+  setSession(connectionId, status);
+  // 재접속으로 다른 데이터베이스의 캐시가 무효해지므로 트리 캐시를 비운다.
+  setState((s) => {
+    const nodes = { ...s.nodes };
+    for (const key of Object.keys(nodes)) {
+      if (key.startsWith(`db:${connectionId}:`) && key !== nodeId.database(connectionId, database)) {
+        delete nodes[key];
+      }
+      if (key.startsWith(`schema:${connectionId}:`) && !key.startsWith(`schema:${connectionId}:${database}:`)) {
+        delete nodes[key];
+      }
+    }
+    return { nodes };
+  });
+}
+
+// ---- 트랜잭션 ---------------------------------------------------------------
+
+export async function setAutoCommit(connectionId: string, value: boolean): Promise<void> {
+  try {
+    setSession(connectionId, await api().tx.setAutoCommit(connectionId, value));
+    notify('info', value ? '자동 커밋 모드로 전환했습니다.' : '수동 커밋 모드로 전환했습니다.');
+  } catch (e) {
+    notify('error', message(e));
+  }
+}
+
+export async function commit(connectionId: string): Promise<void> {
+  try {
+    const before = getState().sessions[connectionId];
+    setSession(connectionId, await api().tx.commit(connectionId));
+    notify('success', before?.txActive ? `커밋했습니다 (${before.txStatements ?? 0}건).` : '커밋할 변경 사항이 없습니다.');
+  } catch (e) {
+    notify('error', `커밋 실패: ${message(e)}`);
+  }
+}
+
+export async function rollback(connectionId: string): Promise<void> {
+  try {
+    const before = getState().sessions[connectionId];
+    setSession(connectionId, await api().tx.rollback(connectionId));
+    notify('info', before?.txActive ? `롤백했습니다 (${before.txStatements ?? 0}건).` : '롤백할 변경 사항이 없습니다.');
+  } catch (e) {
+    notify('error', `롤백 실패: ${message(e)}`);
+  }
+}
+
+export function message(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}

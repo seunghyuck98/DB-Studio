@@ -1,0 +1,45 @@
+name: CI
+
+# main 으로 밀거나 PR 을 올릴 때 타입 검사와 빌드가 깨지지 않는지 확인한다.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 의존성 설치
+        run: npm ci
+        env:
+          # Electron 바이너리는 타입 검사·번들링에 필요 없으므로 받지 않는다 (CI 가 훨씬 빨라진다).
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: 타입 검사
+        run: npm run typecheck
+
+      - name: 렌더러 빌드
+        run: npm run build
+
+      - name: 메인 프로세스 문법 검사
+        run: |
+          node -e "
+          const fs = require('fs'), vm = require('vm');
+          const files = [
+            'electron/main.js', 'electron/preload.js', 'electron/store.js',
+            'electron/history.js', 'electron/export.js', 'electron/db/index.js',
+            'electron/db/mysql.js', 'electron/db/postgres.js', 'electron/db/sqlparse.js',
+            'scripts/make-icon.js',
+          ];
+          for (const f of files) new vm.Script(fs.readFileSync(f, 'utf8'), { filename: f });
+          console.log('main process syntax OK');
+          "
