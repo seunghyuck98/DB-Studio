@@ -11,6 +11,7 @@
     "dev:electron": "wait-on tcp:5273 && cross-env NODE_ENV=development electron .",
     "build": "vite build",
     "start": "npm run build && electron .",
+    "update": "git pull --ff-only && npm install && npm start",
     "typecheck": "tsc --noEmit",
     "icons": "node scripts/make-icon.js",
     "pack": "npm run build && electron-builder --dir",
