@@ -14,11 +14,13 @@ export default function TabBar() {
   );
 }
 
-const TAB_ICON: Record<Tab['kind'], string> = { table: 'table', sql: 'sql', history: 'history' };
+const TAB_ICON: Record<Tab['kind'], string> = { table: 'table', sql: 'sql', history: 'history', tx: 'tx' };
+
+const TAB_SUB: Partial<Record<Tab['kind'], string>> = { history: '전체', tx: '트랜잭션' };
 
 function TabButton({ tab, active, connName }: { tab: Tab; active: boolean; connName: string }) {
   const label = tab.kind === 'table' ? tab.table : tab.title;
-  const sub = tab.kind === 'table' ? `${tab.schema}` : (tab.kind === 'history' ? '전체' : connName);
+  const sub = tab.kind === 'table' ? `${tab.schema}` : (TAB_SUB[tab.kind] ?? connName);
 
   return (
     <div

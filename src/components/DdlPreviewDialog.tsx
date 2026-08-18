@@ -7,12 +7,14 @@ interface Props {
   title: string;
   statements: string[];
   autoCommit: boolean;
+  /** DDL 이 트랜잭션 안에서 되돌려지는 DB 인지 (PostgreSQL 은 true) */
+  transactionalDdl: boolean;
   onClose: () => void;
   onApplied: () => void;
 }
 
 /** 생성된 DDL 을 먼저 보여주고, 확인을 받은 뒤에만 실행한다. */
-export default function DdlPreviewDialog({ connectionId, title, statements, autoCommit, onClose, onApplied }: Props) {
+export default function DdlPreviewDialog({ connectionId, title, statements, autoCommit, transactionalDdl, onClose, onApplied }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sql = statements.join('\n');
@@ -40,8 +42,11 @@ export default function DdlPreviewDialog({ connectionId, title, statements, auto
       <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
         <h3>{title}</h3>
         <p className="modal-desc">
-          아래 문장이 순서대로 실행됩니다. 하나라도 실패하면 전체가 되돌아갑니다.
-          {!autoCommit && ' 수동 커밋 모드이므로 실행 후 커밋해야 확정됩니다.'}
+          아래 문장이 순서대로 실행됩니다.
+          {transactionalDdl
+            ? ' 하나라도 실패하면 전체가 되돌아갑니다.'
+            : ' 이 데이터베이스는 DDL 을 즉시 확정하므로, 중간에 실패하면 앞서 실행된 문장은 그대로 남습니다.'}
+          {!autoCommit && transactionalDdl && ' 수동 커밋 모드이므로 실행 후 커밋해야 확정됩니다.'}
         </p>
         <pre className="code-block scroll-box">{sql}</pre>
         {error && <div className="test-result error">{error}</div>}

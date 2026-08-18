@@ -2,7 +2,7 @@
 
 const { MySqlDriver } = require('./mysql');
 const { PostgresDriver } = require('./postgres');
-const { splitStatements } = require('./sqlparse');
+const { splitStatements, statementInfo } = require('./sqlparse');
 const { snippet } = require('./searchutil');
 const history = require('../history');
 
@@ -24,8 +24,70 @@ class Session {
     this.autoCommit = config.autoCommit !== false;
     this.txActive = false;
     this.txStatements = 0;
+    /** 진행 중인 트랜잭션에서 실행한 변경 문장 목록 */
+    this.txLog = [];
+    this.txSeq = 0;
     this.currentSchema = null;
     this.info = null;
+  }
+
+  /** 커밋 대상이 되는 변경 문장 수 */
+  get txChanges() {
+    return this.txLog.length;
+  }
+
+  clearTx() {
+    this.txActive = false;
+    this.txStatements = 0;
+    this.txLog = [];
+    this.txSeq = 0;
+  }
+
+  /**
+   * 트랜잭션 안에서 실행한 변경 문장을 기록한다.
+   * 조회·세션 설정 문장은 커밋할 것이 없으므로 남기지 않는다.
+   */
+  async noteTx(sql, affected, source) {
+    if (!this.txActive) return;
+    const { kind, verb, ddl } = statementInfo(sql);
+    if (kind !== 'write') return;
+
+    // MySQL·MariaDB 는 DDL 을 만나면 그 앞까지의 변경도 함께 암묵적으로 커밋한다.
+    // 따라서 DDL 이후에는 앞선 문장들도 더 이상 롤백 대상이 아니다.
+    const implicitCommit = ddl && this.kind !== 'postgres';
+    if (implicitCommit) {
+      for (const e of this.txLog) e.rollbackable = false;
+    }
+
+    this.txSeq += 1;
+    this.txLog.push({
+      seq: this.txSeq,
+      at: new Date().toISOString(),
+      sql: String(sql).slice(0, 4000),
+      verb,
+      affected: affected == null ? null : Number(affected),
+      source: source || 'sql',
+      schema: this.currentSchema,
+      ddl: !!ddl,
+      rollbackable: !implicitCommit,
+      /** 이 문장이 앞선 변경까지 암묵적으로 커밋시켰는지 */
+      implicitCommit,
+    });
+
+    if (implicitCommit) {
+      // 서버가 이미 커밋했고 새 트랜잭션을 열어 주지 않으므로,
+      // 이후 문장이 자동 커밋으로 새어 나가지 않게 여기서 다시 시작한다.
+      await this.driver.begin();
+    }
+  }
+
+  /** 커밋·롤백 확인창과 변경 내역 탭에서 쓰는 현재 트랜잭션 상태 */
+  pending() {
+    return {
+      status: this.status(),
+      entries: this.txLog.map((e) => ({ ...e })),
+      totalAffected: this.txLog.reduce((sum, e) => sum + (e.affected || 0), 0),
+    };
   }
 
   get kind() { return this.config.kind; }
@@ -41,7 +103,7 @@ class Session {
   async close() {
     if (this.txActive) {
       try { await this.driver.rollback(); } catch (_) { /* 연결이 끊겨도 세션은 정리한다 */ }
-      this.txActive = false;
+      this.clearTx();
     }
     await this.driver.close();
   }
@@ -54,6 +116,7 @@ class Session {
       autoCommit: this.autoCommit,
       txActive: this.txActive,
       txStatements: this.txStatements,
+      txChanges: this.txChanges,
       currentSchema: this.currentSchema,
       currentDatabase: this.driver.currentDatabase || this.currentSchema,
       serverVersion: this.info ? this.info.version : null,
@@ -64,8 +127,8 @@ class Session {
   async ensureTx() {
     if (!this.autoCommit && !this.txActive) {
       await this.driver.begin();
+      this.clearTx();
       this.txActive = true;
-      this.txStatements = 0;
     }
   }
 
@@ -74,28 +137,25 @@ class Session {
     if (value && this.txActive) {
       // 자동 커밋으로 전환할 때는 열려 있던 트랜잭션을 커밋한다 (DBeaver 와 동일).
       await this.driver.commit();
-      this.txActive = false;
-      this.txStatements = 0;
+      this.clearTx();
     }
     this.autoCommit = value;
     return this.status();
   }
 
-  async commit() {
-    if (!this.txActive) return this.status();
-    await this.driver.commit();
-    this.txActive = false;
-    this.txStatements = 0;
-    return this.status();
+  /** 커밋·롤백 결과를 알려주기 위해 정리 전의 변경 내역을 함께 돌려준다. */
+  async finishTx(action) {
+    if (!this.txActive) return { status: this.status(), entries: [], applied: false };
+    const entries = this.txLog.map((e) => ({ ...e }));
+    if (action === 'commit') await this.driver.commit();
+    else await this.driver.rollback();
+    this.clearTx();
+    return { status: this.status(), entries, applied: true };
   }
 
-  async rollback() {
-    if (!this.txActive) return this.status();
-    await this.driver.rollback();
-    this.txActive = false;
-    this.txStatements = 0;
-    return this.status();
-  }
+  async commit() { return this.finishTx('commit'); }
+
+  async rollback() { return this.finishTx('rollback'); }
 
   /**
    * 한 문장을 실행한다. 자동 커밋 모드가 아니면 트랜잭션 안에서 실행된다.
@@ -107,6 +167,7 @@ class Session {
     try {
       const r = await this.driver.query(sql, params);
       if (this.txActive) this.txStatements++;
+      await this.noteTx(sql, r.affectedRows, source);
       this.log(sql, Date.now() - started, source, { rows: r.rowCount, affected: r.affectedRows, ok: true });
       return r;
     } catch (e) {
@@ -291,6 +352,7 @@ async function applyChanges(id, { schema, table, changes }) {
     const started = Date.now();
     try {
       const r = await d.query(sql, params);
+      await s.noteTx(sql, r.affectedRows, 'edit');
       s.log(sql, Date.now() - started, 'edit', { affected: r.affectedRows, ok: true });
       return r;
     } catch (e) {
@@ -477,6 +539,7 @@ async function executeDDL(id, statements) {
       const started = Date.now();
       try {
         const r = await s.driver.query(sql);
+        await s.noteTx(sql, r.affectedRows, 'ddl');
         s.log(sql, Date.now() - started, 'ddl', { affected: r.affectedRows, ok: true });
         executed.push({ sql, affected: r.affectedRows });
       } catch (e) {
@@ -489,8 +552,15 @@ async function executeDDL(id, statements) {
   return { executed, status: s.status() };
 }
 
+/** 진행 중인 트랜잭션의 변경 내역 */
+function pendingTx(id) {
+  const s = sessions.get(id);
+  if (!s) return { status: { connected: false }, entries: [], totalAffected: 0 };
+  return s.pending();
+}
+
 module.exports = {
-  connect, disconnect, status, listOpen, testConnection,
+  connect, disconnect, status, listOpen, testConnection, pendingTx,
   meta, setSchema, setDatabase,
   selectData, countData, applyChanges, fetchForExport,
   searchObjects,

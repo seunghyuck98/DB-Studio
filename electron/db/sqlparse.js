@@ -87,10 +87,46 @@ function statementAt(script, caret) {
   return stmts[stmts.length - 1];
 }
 
-/** 결과셋을 돌려주는 문장인지 대략 판별한다. */
-function returnsRows(sql) {
-  const head = sql.replace(/^(\s|--[^\n]*\n|\/\*[\s\S]*?\*\/)*/, '').slice(0, 20).toLowerCase();
-  return /^(select|show|desc|describe|explain|with|table|values|pragma)\b/.test(head);
+/** 주석과 앞쪽 공백을 걷어낸 문장 앞부분 */
+function strippedHead(sql) {
+  return String(sql)
+    .replace(/^(?:\s|--[^\n]*\n?|#[^\n]*\n?|\/\*[\s\S]*?\*\/)*/, '')
+    .toLowerCase();
 }
 
-module.exports = { splitStatements, statementAt, returnsRows };
+/** 결과셋을 돌려주는 문장인지 대략 판별한다. */
+function returnsRows(sql) {
+  return /^(select|show|desc|describe|explain|with|table|values|pragma)\b/.test(strippedHead(sql).slice(0, 20));
+}
+
+const WRITE_VERBS = /^(insert|update|delete|replace|merge|truncate|create|alter|drop|rename|comment|grant|revoke|call|do|copy|import)\b/;
+
+/** 구조를 바꾸는 문장. MySQL·MariaDB 에서는 롤백이 되지 않는다. */
+const DDL_VERBS = new Set(['CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'RENAME', 'COMMENT', 'GRANT', 'REVOKE']);
+
+/**
+ * 문장을 종류별로 나눈다.
+ * - write : 데이터나 구조를 바꾸는 문장 (커밋 대상)
+ * - read  : 조회만 하는 문장
+ * - other : SET, USE 처럼 세션 설정을 바꾸는 문장
+ * @returns {{ kind: 'read'|'write'|'other', verb: string, ddl: boolean }}
+ */
+function statementInfo(sql) {
+  const head = strippedHead(sql);
+  const verb = (/^([a-z]+)/.exec(head) || [, ''])[1].toUpperCase();
+  const ddl = DDL_VERBS.has(verb);
+
+  // PostgreSQL 은 WITH ... UPDATE 처럼 CTE 로 시작하는 변경 문장을 허용한다.
+  if (/^with\b/.test(head)) {
+    return {
+      kind: /\b(insert|update|delete|merge)\b/.test(head) ? 'write' : 'read',
+      verb: verb || 'WITH',
+      ddl: false,
+    };
+  }
+  if (WRITE_VERBS.test(head)) return { kind: 'write', verb, ddl };
+  if (returnsRows(sql)) return { kind: 'read', verb, ddl: false };
+  return { kind: 'other', verb, ddl };
+}
+
+module.exports = { splitStatements, statementAt, returnsRows, statementInfo };

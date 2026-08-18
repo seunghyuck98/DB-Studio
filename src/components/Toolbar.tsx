@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAppState, connectionOf, sessionOf, activeTab, openSqlTab, setState, notify } from '../state/store';
+import { useAppState, connectionOf, sessionOf, activeTab, openSqlTab, setState, notify, sqlTabs } from '../state/store';
 import { commit, rollback, setAutoCommit, switchSchema, switchDatabase, message } from '../state/actions';
 import { openHistoryTab } from './HistoryTab';
 import type { DatabaseMeta, SchemaMeta } from '../types';
@@ -14,6 +14,8 @@ export default function Toolbar({ connectionId }: Props) {
   const conn = connectionOf(connectionId, state);
   const connected = !!session?.connected;
   const tab = activeTab(state);
+
+  const sqlEditorCount = sqlTabs(state).length;
 
   const [databases, setDatabases] = useState<DatabaseMeta[]>([]);
   const [schemas, setSchemas] = useState<SchemaMeta[]>([]);
@@ -45,7 +47,8 @@ export default function Toolbar({ connectionId }: Props) {
 
   const autoCommit = session?.autoCommit ?? true;
   const txActive = !!session?.txActive;
-  const pending = session?.txStatements ?? 0;
+  // 커밋 버튼에는 조회를 제외한 실제 변경 문장 수를 보여 준다.
+  const pending = session?.txChanges ?? 0;
 
   const onDatabaseChange = async (value: string) => {
     if (!connectionId) return;
@@ -80,6 +83,13 @@ export default function Toolbar({ connectionId }: Props) {
           }}
         >
           SQL 편집기
+        </button>
+        <button
+          className="btn"
+          title="열려 있는 SQL 편집기 목록 (⌘⇧L)"
+          onClick={() => setState((s) => ({ sqlListOpen: !s.sqlListOpen }))}
+        >
+          목록{sqlEditorCount > 0 ? ` (${sqlEditorCount})` : ''}
         </button>
         <button className="btn" title="쿼리 히스토리 (⌘⇧H)" onClick={openHistoryTab}>
           히스토리

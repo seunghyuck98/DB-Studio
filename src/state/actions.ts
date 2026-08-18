@@ -236,25 +236,43 @@ export async function setAutoCommit(connectionId: string, value: boolean): Promi
   }
 }
 
-export async function commit(connectionId: string): Promise<void> {
+/**
+ * 커밋·롤백을 요청한다.
+ * 트랜잭션이 열려 있으면 변경 내역을 보여 주는 확인창을 먼저 띄우고,
+ * 확정할 것이 없으면 바로 알려 주기만 한다.
+ */
+export async function requestFinishTx(connectionId: string, action: 'commit' | 'rollback'): Promise<void> {
+  const session = getState().sessions[connectionId];
+  if (!session?.txActive) {
+    notify('info', action === 'commit' ? '커밋할 변경 사항이 없습니다.' : '롤백할 변경 사항이 없습니다.');
+    return;
+  }
+  setState({ dialog: { kind: 'txConfirm', connectionId, action } });
+}
+
+/** 확인창에서 확정한 뒤 실제로 커밋·롤백한다. */
+export async function finishTx(connectionId: string, action: 'commit' | 'rollback'): Promise<boolean> {
   try {
-    const before = getState().sessions[connectionId];
-    setSession(connectionId, await api().tx.commit(connectionId));
-    notify('success', before?.txActive ? `커밋했습니다 (${before.txStatements ?? 0}건).` : '커밋할 변경 사항이 없습니다.');
+    const res = action === 'commit'
+      ? await api().tx.commit(connectionId)
+      : await api().tx.rollback(connectionId);
+    setSession(connectionId, res.status);
+    const count = res.entries.length;
+    const rows = res.entries.reduce((sum, e) => sum + (e.affected || 0), 0);
+    if (action === 'commit') {
+      notify('success', `커밋했습니다 — 문장 ${count}건, 행 ${rows.toLocaleString()}개.`);
+    } else {
+      notify('info', `롤백했습니다 — 문장 ${count}건을 되돌렸습니다.`);
+    }
+    return true;
   } catch (e) {
-    notify('error', `커밋 실패: ${message(e)}`);
+    notify('error', `${action === 'commit' ? '커밋' : '롤백'} 실패: ${message(e)}`);
+    return false;
   }
 }
 
-export async function rollback(connectionId: string): Promise<void> {
-  try {
-    const before = getState().sessions[connectionId];
-    setSession(connectionId, await api().tx.rollback(connectionId));
-    notify('info', before?.txActive ? `롤백했습니다 (${before.txStatements ?? 0}건).` : '롤백할 변경 사항이 없습니다.');
-  } catch (e) {
-    notify('error', `롤백 실패: ${message(e)}`);
-  }
-}
+export const commit = (connectionId: string) => requestFinishTx(connectionId, 'commit');
+export const rollback = (connectionId: string) => requestFinishTx(connectionId, 'rollback');
 
 export function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);

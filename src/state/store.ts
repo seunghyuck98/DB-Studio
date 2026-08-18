@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type {
-  ConnectionConfig, SessionStatus, Tab, TableTab, SqlTab, HistoryTab,
+  ConnectionConfig, SessionStatus, Tab, TableTab, SqlTab, HistoryTab, TxTab,
   SearchScopes, SearchResult,
 } from '../types';
 
@@ -49,7 +49,13 @@ export interface AppState {
   treeFilter: string;
   search: SearchState;
   toast: Toast | null;
-  dialog: { kind: 'connection'; connection: ConnectionConfig | null } | { kind: 'password'; connection: ConnectionConfig } | null;
+  /** SQL 편집기 목록 패널 표시 여부 */
+  sqlListOpen: boolean;
+  dialog:
+    | { kind: 'connection'; connection: ConnectionConfig | null }
+    | { kind: 'password'; connection: ConnectionConfig }
+    | { kind: 'txConfirm'; connectionId: string; action: 'commit' | 'rollback' }
+    | null;
 }
 
 /** 이름만 찾을 때는 트리에서 바로 거르고, 나머지는 DB 에 물어봐야 한다. */
@@ -73,6 +79,7 @@ const initialState: AppState = {
     error: null,
   },
   toast: null,
+  sqlListOpen: false,
   dialog: null,
 };
 
@@ -182,6 +189,34 @@ export function openSqlTab(connectionId: string, database: string, schema: strin
   setState((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
 }
 
+/** 접속별 변경 내역 탭을 열거나 이미 열려 있으면 그 탭으로 이동한다. */
+export function openTxTab(connectionId: string): void {
+  const id = `tx:${connectionId}`;
+  setState((s) => {
+    if (s.tabs.some((t) => t.id === id)) return { activeTabId: id };
+    const session = s.sessions[connectionId];
+    const conn = s.connections.find((c) => c.id === connectionId);
+    const tab: TxTab = {
+      id,
+      kind: 'tx',
+      connectionId,
+      database: session?.currentDatabase ?? '',
+      schema: session?.currentSchema ?? '',
+      title: `변경 내역${conn ? ` · ${conn.name}` : ''}`,
+    };
+    return { tabs: [...s.tabs, tab], activeTabId: id };
+  });
+}
+
+/** 열려 있는 SQL 편집기 목록 (목록 패널에서 쓴다) */
+export function sqlTabs(s: AppState = state): SqlTab[] {
+  return s.tabs.filter((t): t is SqlTab => t.kind === 'sql');
+}
+
+export function closeTabs(ids: string[]): void {
+  ids.forEach(closeTab);
+}
+
 export function closeTab(id: string): void {
   setState((s) => {
     const idx = s.tabs.findIndex((t) => t.id === id);
@@ -206,7 +241,10 @@ export function setActiveTab(id: string): void {
   setState({ activeTabId: id });
 }
 
-export function updateTab(id: string, patch: Partial<TableTab> | Partial<SqlTab> | Partial<HistoryTab>): void {
+export function updateTab(
+  id: string,
+  patch: Partial<TableTab> | Partial<SqlTab> | Partial<HistoryTab> | Partial<TxTab>,
+): void {
   setState((s) => ({
     tabs: s.tabs.map((t) => (t.id === id ? ({ ...t, ...patch } as Tab) : t)),
   }));

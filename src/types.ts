@@ -22,7 +22,10 @@ export interface SessionStatus {
   hasSchemaLevel?: boolean;
   autoCommit?: boolean;
   txActive?: boolean;
+  /** 트랜잭션에서 실행한 전체 문장 수 (조회 포함) */
   txStatements?: number;
+  /** 커밋 대상이 되는 변경 문장 수 */
+  txChanges?: number;
   currentSchema?: string | null;
   currentDatabase?: string | null;
   serverVersion?: string | null;
@@ -177,6 +180,35 @@ export interface SearchResult {
   truncated: boolean;
 }
 
+/** 진행 중인 트랜잭션에서 실행한 변경 문장 하나 */
+export interface TxEntry {
+  seq: number;
+  at: string;
+  sql: string;
+  verb: string;
+  affected: number | null;
+  source: string;
+  schema: string | null;
+  /** 구조를 바꾸는 문장인지 */
+  ddl: boolean;
+  /** 롤백으로 되돌릴 수 있는지 */
+  rollbackable: boolean;
+  /** 이 문장이 앞선 변경까지 암묵적으로 커밋시켰는지 (MySQL·MariaDB 의 DDL) */
+  implicitCommit: boolean;
+}
+
+export interface PendingTx {
+  status: SessionStatus;
+  entries: TxEntry[];
+  totalAffected: number;
+}
+
+export interface TxFinishResult {
+  status: SessionStatus;
+  entries: TxEntry[];
+  applied: boolean;
+}
+
 export type ExportFormat = 'csv' | 'tsv' | 'xlsx';
 
 export interface ExportResult {
@@ -205,7 +237,7 @@ export interface ColumnChangeSpec {
   tableComment?: string | null;
 }
 
-export type TabKind = 'table' | 'sql' | 'history';
+export type TabKind = 'table' | 'sql' | 'history' | 'tx';
 
 export interface TableTab {
   id: string;
@@ -236,7 +268,17 @@ export interface HistoryTab {
   title: string;
 }
 
-export type Tab = TableTab | SqlTab | HistoryTab;
+/** 진행 중인 트랜잭션의 변경 내역 탭 (접속별로 하나) */
+export interface TxTab {
+  id: string;
+  kind: 'tx';
+  connectionId: string;
+  database: string;
+  schema: string;
+  title: string;
+}
+
+export type Tab = TableTab | SqlTab | HistoryTab | TxTab;
 
 declare global {
   interface Window {
@@ -293,8 +335,9 @@ declare global {
       };
       tx: {
         setAutoCommit(id: string, value: boolean): Promise<SessionStatus>;
-        commit(id: string): Promise<SessionStatus>;
-        rollback(id: string): Promise<SessionStatus>;
+        pending(id: string): Promise<PendingTx>;
+        commit(id: string): Promise<TxFinishResult>;
+        rollback(id: string): Promise<TxFinishResult>;
       };
       onMenu(handler: (channel: string) => void): () => void;
       platform: string;

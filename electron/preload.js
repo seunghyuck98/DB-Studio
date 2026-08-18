@@ -16,7 +16,7 @@ async function call(channel, ...args) {
 const MENU_CHANNELS = [
   'menu:new-sql', 'menu:new-connection', 'menu:commit',
   'menu:rollback', 'menu:toggle-autocommit', 'menu:refresh',
-  'menu:history', 'menu:explain',
+  'menu:history', 'menu:explain', 'menu:sql-list',
 ];
 
 contextBridge.exposeInMainWorld('api', {
@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   tx: {
     setAutoCommit: (id, value) => call('tx:autoCommit', id, value),
+    pending: (id) => call('tx:pending', id),
     commit: (id) => call('tx:commit', id),
     rollback: (id) => call('tx:rollback', id),
   },

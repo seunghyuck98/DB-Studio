@@ -421,6 +421,93 @@ body {
 .empty-state h2 { margin: 0 0 8px; color: var(--text); font-size: 20px; font-weight: 600; }
 .empty-state ul { list-style: none; padding: 0; margin: 18px 0 0; font-size: 12px; line-height: 1.9; }
 
+/* ---- SQL 편집기 목록 --------------------------------------------------------- */
+
+.sqllist-backdrop { position: fixed; inset: 0; z-index: 90; }
+.sqllist {
+  position: absolute; left: 12px; top: 46px;
+  width: 460px; max-width: calc(100vw - 24px); max-height: 70vh;
+  display: flex; flex-direction: column;
+  background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .5);
+}
+.sqllist-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; border-bottom: 1px solid var(--border-soft);
+}
+.sqllist-body { flex: 1; overflow: auto; }
+.sqllist-item { padding: 7px 10px; border-bottom: 1px solid var(--border-soft); cursor: default; }
+.sqllist-item:hover { background: var(--row-hover); }
+.sqllist-item.active { background: var(--row-select); }
+.sqllist-item-head { display: flex; align-items: center; gap: 6px; }
+.sqllist-title { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sqllist-badge {
+  padding: 0 5px; border-radius: 8px; font-size: 10px;
+  background: var(--bg-sunken); border: 1px solid var(--accent-dim); color: #9ab6ff;
+}
+.sqllist-item-head .icon-btn { margin-left: auto; }
+.sqllist-item-head .icon-btn + .icon-btn { margin-left: 0; }
+.icon-btn.danger { color: #ef8080; }
+.sqllist-meta { font-size: 10px; color: var(--text-faint); font-family: var(--mono); }
+.sqllist-preview {
+  margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sqllist-foot { padding: 6px 10px; border-top: 1px solid var(--border-soft); }
+
+/* ---- 트랜잭션 변경 내역 ------------------------------------------------------- */
+
+.icon-tx { background: #e11d48; }
+.icon-tx::before { content: 'T'; }
+
+.status-link {
+  background: none; border: none; padding: 0; font: inherit; cursor: pointer;
+  text-decoration: underline dotted; text-underline-offset: 2px;
+}
+.status-link:hover { color: var(--text); }
+
+.tx-tab { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.tx-toolbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border-bottom: 1px solid var(--border-soft);
+}
+.tx-state { font-size: 12px; font-weight: 600; }
+.tx-state.on { color: var(--amber); }
+.tx-state.off { color: var(--text-faint); }
+.tx-summary {
+  padding: 6px 10px; font-size: 12px;
+  background: rgba(210, 153, 34, .12); border-bottom: 1px solid var(--border-soft);
+  color: #e6cf94;
+}
+.tx-summary.commit { border-radius: 4px; border: 1px solid #2f6b3a; background: rgba(63, 185, 80, .12); color: #8fe0a0; margin: 10px 0 8px; }
+.tx-summary.rollback { border-radius: 4px; border: 1px solid #7a3b3b; background: rgba(240, 71, 71, .12); color: #ff9a9a; margin: 10px 0 8px; }
+.tx-note { padding: 12px; }
+.tx-scroll { max-height: 40vh; }
+.tx-table .tx-sql { max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.verb-badge {
+  display: inline-block; padding: 0 5px; border-radius: 3px;
+  font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  background: var(--bg-sunken); border: 1px solid var(--border); color: var(--text-dim);
+}
+.verb-badge.v-insert { color: #8fe0a0; border-color: #2f6b3a; }
+.verb-badge.v-update { color: #9ab6ff; border-color: var(--accent-dim); }
+.verb-badge.v-delete { color: #ff9a9a; border-color: #7a3b3b; }
+.verb-badge.v-truncate { color: #ff9a9a; border-color: #7a3b3b; }
+.verb-badge.v-alter, .verb-badge.v-create, .verb-badge.v-drop { color: #e0c27a; border-color: #6b5a2f; }
+
+.btn.danger, .btn.danger:hover:not(:disabled) { background: #7a2f2f; border-color: #a34a4a; color: #ffdede; }
+
+.tx-warn {
+  margin: 8px 0; padding: 8px 10px; border-radius: 4px; font-size: 12px; line-height: 1.55;
+  background: rgba(210, 153, 34, .14); border: 1px solid #6b5a2f; color: #e6cf94;
+}
+.badge-note {
+  margin-left: 5px; padding: 0 5px; border-radius: 3px; font-size: 9px; font-weight: 700;
+  background: var(--amber); color: #1e1f22;
+}
+.tx-table tr.not-rollbackable td { background: rgba(210, 153, 34, .08); }
+
 /* ---- 사이드바 검색 범위 / 검색 결과 ------------------------------------------ */
 
 .scope-box { position: relative; flex: 0 0 auto; }

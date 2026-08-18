@@ -79,6 +79,7 @@ function buildMenu() {
       submenu: [
         { label: '새로 고침', accelerator: 'F5', click: send('menu:refresh') },
         { label: '쿼리 히스토리', accelerator: 'CmdOrCtrl+Shift+H', click: send('menu:history') },
+        { label: 'SQL 편집기 목록', accelerator: 'CmdOrCtrl+Shift+L', click: send('menu:sql-list') },
         { label: '실행 계획', accelerator: 'CmdOrCtrl+Shift+E', click: send('menu:explain') },
         { type: 'separator' },
         { role: 'reload', label: '화면 다시 읽기' },
@@ -140,6 +141,7 @@ handle('history:list', (query) => history.list(query));
 handle('history:clear', () => history.clear());
 
 handle('tx:autoCommit', (id, value) => db.setAutoCommit(id, value));
+handle('tx:pending', (id) => db.pendingTx(id));
 handle('tx:commit', (id) => db.commit(id));
 handle('tx:rollback', (id) => db.rollback(id));
 

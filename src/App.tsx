@@ -6,9 +6,12 @@ import Breadcrumb from './components/Breadcrumb';
 import TableEditor from './components/TableEditor';
 import SqlEditor from './components/SqlEditor';
 import HistoryTab, { openHistoryTab } from './components/HistoryTab';
+import TxTab from './components/TxTab';
+import SqlEditorList from './components/SqlEditorList';
 import StatusBar from './components/StatusBar';
 import ConnectionDialog from './components/ConnectionDialog';
 import PasswordDialog from './components/PasswordDialog';
+import TxConfirmDialog from './components/TxConfirmDialog';
 import Toaster from './components/Toaster';
 import { useAppState, activeTab, activeConnectionId, setState, openSqlTab } from './state/store';
 import { loadConnections, commit, rollback, setAutoCommit } from './state/actions';
@@ -49,6 +52,9 @@ export default function App() {
         case 'menu:history':
           openHistoryTab();
           break;
+        case 'menu:sql-list':
+          setState((prev) => ({ sqlListOpen: !prev.sqlListOpen }));
+          break;
         case 'menu:explain':
           window.dispatchEvent(new CustomEvent('dbstudio:explain'));
           break;
@@ -70,12 +76,17 @@ export default function App() {
             {tab?.kind === 'table' && <TableEditor key={tab.id} tab={tab} />}
             {tab?.kind === 'sql' && <SqlEditor key={tab.id} tab={tab} />}
             {tab?.kind === 'history' && <HistoryTab key={tab.id} tab={tab} />}
+            {tab?.kind === 'tx' && <TxTab key={tab.id} tab={tab} />}
           </div>
         </main>
       </div>
       <StatusBar connectionId={connId} />
+      {state.sqlListOpen && <SqlEditorList />}
       {state.dialog?.kind === 'connection' && <ConnectionDialog connection={state.dialog.connection} />}
       {state.dialog?.kind === 'password' && <PasswordDialog connection={state.dialog.connection} />}
+      {state.dialog?.kind === 'txConfirm' && (
+        <TxConfirmDialog connectionId={state.dialog.connectionId} action={state.dialog.action} />
+      )}
       <Toaster />
     </div>
   );
@@ -92,6 +103,7 @@ function EmptyState() {
         <li><b>⌘/Ctrl + ⌥ + C / R</b> — 커밋 / 롤백</li>
         <li><b>⌘/Ctrl + ⇧ + E</b> — 실행 계획</li>
         <li><b>⌘/Ctrl + ⇧ + H</b> — 쿼리 히스토리</li>
+        <li><b>⌘/Ctrl + ⇧ + L</b> — SQL 편집기 목록</li>
         <li><b>F5</b> — 현재 화면 새로 고침</li>
       </ul>
     </div>

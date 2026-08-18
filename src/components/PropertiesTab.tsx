@@ -271,6 +271,7 @@ function ColumnsPanel({ tab, rows, onChanged }: { tab: TableTab; rows: TableColu
           title={`${tab.schema}.${tab.table} 컬럼 변경`}
           statements={preview}
           autoCommit={session?.autoCommit ?? true}
+          transactionalDdl={session?.kind === 'postgres'}
           onClose={() => setPreview(null)}
           onApplied={() => { cancel(); onChanged(); }}
         />
@@ -334,6 +335,7 @@ function DdlPanel({ tab, ddl, onChanged }: { tab: TableTab; ddl: string; onChang
           title={`${tab.schema}.${tab.table} DDL 실행`}
           statements={preview}
           autoCommit={session?.autoCommit ?? true}
+          transactionalDdl={session?.kind === 'postgres'}
           onClose={() => setPreview(null)}
           onApplied={onChanged}
         />
