@@ -69,7 +69,9 @@ jobs:
         with:
           name: installer-${{ matrix.name }}
           path: out/*
-          retention-days: 7
+          # publish 잡이 바로 내려받아 Releases 에 올리므로 오래 둘 필요가 없다.
+          # 설치파일이 릴리스당 수백 MB 라서, 짧게 잡아 Actions 저장 용량을 아낀다.
+          retention-days: 1
           if-no-files-found: error
 
   publish:
