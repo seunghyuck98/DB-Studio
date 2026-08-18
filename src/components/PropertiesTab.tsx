@@ -306,10 +306,7 @@ function DdlPanel({ tab, ddl, onChanged }: { tab: TableTab; ddl: string; onChang
         </button>
         <button
           className="btn small"
-          onClick={() => {
-            openSqlTab(tab.connectionId, tab.database, tab.schema);
-            window.dispatchEvent(new CustomEvent('dbstudio:insert-sql', { detail: text }));
-          }}
+          onClick={() => openSqlTab(tab.connectionId, tab.database, tab.schema, text)}
         >
           SQL 편집기로 보내기
         </button>

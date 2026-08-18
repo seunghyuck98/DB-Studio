@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ExportButton from './ExportButton';
+import RecordView from './RecordView';
 import type { StatementResult } from '../types';
 
 interface Props {
@@ -11,6 +12,15 @@ interface Props {
 /** SQL 편집기 실행 결과를 읽기 전용으로 보여주는 그리드. */
 export default function ResultGrid({ result, exportSource }: Props) {
   const [copied, setCopied] = useState(false);
+  const [selectedRow, setSelectedRow] = useState<number | null>(null);
+  const [recordMode, setRecordMode] = useState(false);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  // 새 결과가 오면 선택을 초기화한다.
+  useEffect(() => {
+    setSelectedRow(null);
+    setRecordMode(false);
+  }, [result]);
 
   const copyAsTsv = async () => {
     const head = result.columns.map((c) => c.name).join('\t');
@@ -28,6 +38,14 @@ export default function ResultGrid({ result, exportSource }: Props) {
           {result.truncated && ' · 표시 한도 초과(일부만 표시)'}
         </span>
         <div className="spacer" />
+        <button
+          className={`btn small ${recordMode ? 'primary' : ''}`}
+          disabled={selectedRow === null}
+          title="선택한 행을 세로로 보기 (Tab)"
+          onClick={() => setRecordMode((v) => !v)}
+        >
+          {recordMode ? '그리드' : '세로 보기'}
+        </button>
         <button className="btn small" onClick={() => void copyAsTsv()}>{copied ? '복사됨' : '결과 복사'}</button>
         <ExportButton
           defaultName={exportSource?.name ?? 'query-result'}
@@ -37,34 +55,60 @@ export default function ResultGrid({ result, exportSource }: Props) {
             : null}
         />
       </div>
-      <div className="grid-scroll">
-        <table className="data-grid">
-          <thead>
-            <tr>
-              <th className="rownum" />
-              {result.columns.map((c, i) => (
-                <th key={`${c.name}-${i}`} title={`${c.name} : ${c.type}`}>
-                  <span className="col-name">{c.name}</span>
-                  <span className="col-type">{c.type}</span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {result.rows.map((row, i) => (
-              <tr key={i}>
-                <td className="rownum">{i + 1}</td>
-                {row.map((v, j) => (
-                  <td key={j} className={v === null ? 'null' : ''} title={cellText(v)}>
-                    {v === null ? '[NULL]' : cellText(v)}
-                  </td>
+      {recordMode && selectedRow !== null ? (
+        <RecordView
+          columns={result.columns.map((c) => ({ name: c.name, type: c.type }))}
+          values={result.rows[selectedRow] ?? []}
+          rowNumber={selectedRow + 1}
+          totalRows={result.rows.length}
+          onPrev={() => setSelectedRow((r) => Math.max(0, (r ?? 0) - 1))}
+          onNext={() => setSelectedRow((r) => Math.min(result.rows.length - 1, (r ?? 0) + 1))}
+          onExitRecordMode={() => setRecordMode(false)}
+        />
+      ) : (
+        <div
+          className="grid-scroll"
+          ref={gridRef}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Tab' && selectedRow !== null) {
+              e.preventDefault();
+              setRecordMode(true);
+            }
+          }}
+        >
+          <table className="data-grid">
+            <thead>
+              <tr>
+                <th className="rownum" />
+                {result.columns.map((c, i) => (
+                  <th key={`${c.name}-${i}`} title={`${c.name} : ${c.type}`}>
+                    <span className="col-name">{c.name}</span>
+                    <span className="col-type">{c.type}</span>
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {result.rows.length === 0 && <div className="pane-message muted">결과가 없습니다.</div>}
-      </div>
+            </thead>
+            <tbody>
+              {result.rows.map((row, i) => (
+                <tr
+                  key={i}
+                  className={selectedRow === i ? 'row-selected' : ''}
+                  onClick={() => { setSelectedRow(i); gridRef.current?.focus(); }}
+                >
+                  <td className="rownum">{i + 1}</td>
+                  {row.map((v, j) => (
+                    <td key={j} className={v === null ? 'null' : ''} title={cellText(v)}>
+                      {v === null ? '[NULL]' : cellText(v)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {result.rows.length === 0 && <div className="pane-message muted">결과가 없습니다.</div>}
+        </div>
+      )}
     </div>
   );
 }

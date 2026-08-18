@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('api', {
     get: (id, action, args) => call('meta:get', id, action, args || {}),
     setSchema: (id, schema) => call('meta:setSchema', id, schema),
     setDatabase: (id, database) => call('meta:setDatabase', id, database),
+    search: (id, req) => call('meta:search', id, req),
   },
   data: {
     select: (id, args) => call('data:select', id, args),

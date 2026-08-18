@@ -58,8 +58,7 @@ export default function HistoryTab({ tab }: { tab: HistoryTabType }) {
       notify('error', '이 문장을 실행했던 접속이 열려 있지 않습니다. 먼저 접속하세요.');
       return;
     }
-    openSqlTab(entry.connectionId, session.currentDatabase ?? '', session.currentSchema ?? '');
-    window.dispatchEvent(new CustomEvent('dbstudio:insert-sql', { detail: entry.sql }));
+    openSqlTab(entry.connectionId, session.currentDatabase ?? '', session.currentSchema ?? '', entry.sql);
   };
 
   const clearAll = async () => {

@@ -117,6 +117,7 @@ handle('conn:encryptionAvailable', () => store.encryptionAvailable());
 handle('meta:get', (id, action, args) => db.meta(id, action, args));
 handle('meta:setSchema', (id, schema) => db.setSchema(id, schema));
 handle('meta:setDatabase', (id, database) => db.setDatabase(id, database));
+handle('meta:search', (id, req) => db.searchObjects(id, req));
 
 handle('data:select', (id, args) => db.selectData(id, args));
 handle('data:count', (id, args) => db.countData(id, args));

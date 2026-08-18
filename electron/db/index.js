@@ -3,6 +3,7 @@
 const { MySqlDriver } = require('./mysql');
 const { PostgresDriver } = require('./postgres');
 const { splitStatements } = require('./sqlparse');
+const { snippet } = require('./searchutil');
 const history = require('../history');
 
 const DRIVERS = {
@@ -384,6 +385,51 @@ async function executeScript(id, sql, opts = {}) {
   return { results, status: s.status() };
 }
 
+// ---- 객체 검색 ---------------------------------------------------------------
+
+/**
+ * 이름·컬럼·주석·정의 스크립트에서 객체를 찾는다.
+ * @param {{term:string, schemas?:string[], scopes?:object, limit?:number}} req
+ */
+async function searchObjects(id, req) {
+  const s = get(id);
+  const term = String(req.term || '').trim();
+  if (term.length < 2) throw new Error('검색어를 2글자 이상 입력하세요.');
+
+  const scopes = req.scopes && Object.values(req.scopes).some(Boolean)
+    ? req.scopes
+    : { names: true };
+
+  // 대상 스키마를 정하지 않았으면 현재 스키마(MySQL 은 현재 데이터베이스)만 본다.
+  let schemas = Array.isArray(req.schemas) && req.schemas.length ? req.schemas : null;
+  if (!schemas) {
+    const current = s.currentSchema || s.driver.currentDatabase;
+    schemas = current ? [current] : [];
+  }
+  if (!schemas.length) throw new Error('검색할 스키마를 정할 수 없습니다.');
+
+  const started = Date.now();
+  try {
+    const raw = await s.driver.searchObjects(term, { schemas, scopes, limit: req.limit || 200 });
+    const hits = raw.map((h) => ({
+      kind: h.kind,
+      schema: h.schema,
+      table: h.table || null,
+      name: h.name,
+      matchedIn: h.matchedIn,
+      detail: h.detail || null,
+      // 정의 본문은 통째로 넘기지 않고 검색어 주변만 잘라 보낸다.
+      snippet: h.text ? snippet(h.text, term) : null,
+      objectKind: h.objectKind || (h.kind === 'view' ? 'view' : 'table'),
+    }));
+    s.log(`-- 객체 검색: ${term}`, Date.now() - started, 'search', { rows: hits.length, ok: true });
+    return { term, schemas, hits, truncated: raw.length >= (req.limit || 200) };
+  } catch (e) {
+    s.log(`-- 객체 검색: ${term}`, Date.now() - started, 'search', { ok: false, error: e.message });
+    throw e;
+  }
+}
+
 // ---- 실행 계획 ---------------------------------------------------------------
 
 /** 문장의 실행 계획을 가져온다. analyze 를 켜면 쿼리가 실제로 실행된다. */
@@ -447,6 +493,7 @@ module.exports = {
   connect, disconnect, status, listOpen, testConnection,
   meta, setSchema, setDatabase,
   selectData, countData, applyChanges, fetchForExport,
+  searchObjects,
   executeScript, explain, previewColumnDDL, executeDDL,
   setAutoCommit: async (id, v) => get(id).setAutoCommit(v),
   commit: async (id) => get(id).commit(),

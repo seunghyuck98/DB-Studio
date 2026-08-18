@@ -147,6 +147,36 @@ export interface HistoryEntry {
   source: string;
 }
 
+/** 객체 검색에서 무엇을 뒤질지 */
+export interface SearchScopes {
+  names: boolean;
+  columns: boolean;
+  comments: boolean;
+  source: boolean;
+}
+
+export type SearchHitKind = 'table' | 'view' | 'column' | 'routine' | 'trigger';
+export type SearchMatchedIn = 'name' | 'column' | 'comment' | 'source';
+
+export interface SearchHit {
+  kind: SearchHitKind;
+  schema: string;
+  table: string | null;
+  name: string;
+  matchedIn: SearchMatchedIn;
+  detail: string | null;
+  /** 정의 스크립트에서 검색어 주변만 잘라낸 부분 */
+  snippet: string | null;
+  objectKind: 'table' | 'view';
+}
+
+export interface SearchResult {
+  term: string;
+  schemas: string[];
+  hits: SearchHit[];
+  truncated: boolean;
+}
+
 export type ExportFormat = 'csv' | 'tsv' | 'xlsx';
 
 export interface ExportResult {
@@ -225,6 +255,9 @@ declare global {
         get(id: string, action: string, args?: Record<string, unknown>): Promise<any>;
         setSchema(id: string, schema: string): Promise<SessionStatus>;
         setDatabase(id: string, database: string): Promise<SessionStatus>;
+        search(id: string, req: {
+          term: string; schemas?: string[]; scopes?: Partial<SearchScopes>; limit?: number;
+        }): Promise<SearchResult>;
       };
       data: {
         select(id: string, args: Record<string, unknown>): Promise<QueryResult>;

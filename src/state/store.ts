@@ -1,5 +1,8 @@
 import { useSyncExternalStore } from 'react';
-import type { ConnectionConfig, SessionStatus, Tab, TableTab, SqlTab, HistoryTab } from '../types';
+import type {
+  ConnectionConfig, SessionStatus, Tab, TableTab, SqlTab, HistoryTab,
+  SearchScopes, SearchResult,
+} from '../types';
 
 export type TreeItemType = 'connection' | 'database' | 'schema' | 'table' | 'view';
 
@@ -26,6 +29,16 @@ export interface Toast {
   at: number;
 }
 
+/** 사이드바 객체 검색 상태 */
+export interface SearchState {
+  scopes: SearchScopes;
+  /** 현재 스키마만 볼지, 접속의 모든 스키마를 볼지 */
+  allSchemas: boolean;
+  running: boolean;
+  result: SearchResult | null;
+  error: string | null;
+}
+
 export interface AppState {
   connections: ConnectionConfig[];
   sessions: Record<string, SessionStatus>;
@@ -34,8 +47,14 @@ export interface AppState {
   tabs: Tab[];
   activeTabId: string | null;
   treeFilter: string;
+  search: SearchState;
   toast: Toast | null;
   dialog: { kind: 'connection'; connection: ConnectionConfig | null } | { kind: 'password'; connection: ConnectionConfig } | null;
+}
+
+/** 이름만 찾을 때는 트리에서 바로 거르고, 나머지는 DB 에 물어봐야 한다. */
+export function needsServerSearch(scopes: SearchScopes): boolean {
+  return scopes.columns || scopes.comments || scopes.source;
 }
 
 const initialState: AppState = {
@@ -46,6 +65,13 @@ const initialState: AppState = {
   tabs: [],
   activeTabId: null,
   treeFilter: '',
+  search: {
+    scopes: { names: true, columns: false, comments: false, source: false },
+    allSchemas: false,
+    running: false,
+    result: null,
+    error: null,
+  },
   toast: null,
   dialog: null,
 };
@@ -119,6 +145,14 @@ export function setSession(connectionId: string, status: SessionStatus): void {
   setState((s) => ({ sessions: { ...s.sessions, [connectionId]: status } }));
 }
 
+export function setSearch(patch: Partial<SearchState>): void {
+  setState((s) => ({ search: { ...s.search, ...patch } }));
+}
+
+export function clearSearchResult(): void {
+  setSearch({ result: null, error: null });
+}
+
 export function tableTabId(connectionId: string, database: string, schema: string, table: string): string {
   return `table:${connectionId}:${database}:${schema}:${table}`;
 }
@@ -135,10 +169,16 @@ export function openTableTab(tab: Omit<TableTab, 'id' | 'kind' | 'activeSection'
 
 let sqlSeq = 0;
 
-export function openSqlTab(connectionId: string, database: string, schema: string): void {
+/**
+ * 새 SQL 편집기 탭을 연다.
+ * initialSql 은 탭이 그려지기 전에 미리 넣어 둔다. 탭을 만든 직후 이벤트로 보내면
+ * 편집기가 아직 붙기 전이라 놓칠 수 있다.
+ */
+export function openSqlTab(connectionId: string, database: string, schema: string, initialSql?: string): void {
   sqlSeq += 1;
   const id = `sql:${connectionId}:${sqlSeq}`;
   const tab: SqlTab = { id, kind: 'sql', connectionId, database, schema, title: `SQL ${sqlSeq}` };
+  if (initialSql) setTabScratch(id, 'sql', initialSql);
   setState((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
 }
 

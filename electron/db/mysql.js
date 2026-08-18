@@ -1,6 +1,7 @@
 'use strict';
 
 const mysql = require('mysql2/promise');
+const { likePattern } = require('./searchutil');
 
 let TYPE_NAMES = null;
 function typeName(code) {
@@ -261,6 +262,116 @@ class MySqlDriver {
     const r = await this.rows(`SHOW CREATE ${kind === 'view' ? 'VIEW' : 'TABLE'} ${this.qualify(schema, table)}`);
     const row = r[0] || {};
     return row['Create Table'] || row['Create View'] || '';
+  }
+
+  // ---- 객체 검색 -------------------------------------------------------------
+
+  /**
+   * 이름·컬럼·주석·정의 스크립트에서 검색어를 찾는다.
+   * @param {string} term
+   * @param {{schemas:string[], scopes:{names?:boolean,columns?:boolean,comments?:boolean,source?:boolean}, limit?:number}} opts
+   */
+  async searchObjects(term, opts) {
+    const like = likePattern(term);
+    const schemas = opts.schemas;
+    const scopes = opts.scopes || {};
+    const limit = Number(opts.limit) || 200;
+    const marks = schemas.map(() => '?').join(', ');
+    const hits = [];
+
+    if (scopes.names) {
+      const r = await this.rows(
+        `SELECT table_schema AS s, table_name AS n, table_type AS t
+           FROM information_schema.tables
+          WHERE table_schema IN (${marks}) AND table_name LIKE ? ESCAPE '\\\\'
+          ORDER BY table_schema, table_name LIMIT ${limit}`,
+        [...schemas, like],
+      );
+      for (const x of r) {
+        hits.push({ kind: x.t === 'VIEW' ? 'view' : 'table', schema: x.s, table: x.n, name: x.n, matchedIn: 'name' });
+      }
+    }
+
+    if (scopes.columns) {
+      const r = await this.rows(
+        `SELECT c.table_schema AS s, c.table_name AS n, c.column_name AS col, c.column_type AS ct,
+                t.table_type AS tt
+           FROM information_schema.columns c
+           JOIN information_schema.tables t
+             ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+          WHERE c.table_schema IN (${marks}) AND c.column_name LIKE ? ESCAPE '\\\\'
+          ORDER BY c.table_schema, c.table_name, c.ordinal_position LIMIT ${limit}`,
+        [...schemas, like],
+      );
+      for (const x of r) {
+        hits.push({
+          kind: 'column', schema: x.s, table: x.n, name: x.col,
+          matchedIn: 'column', detail: x.ct, objectKind: x.tt === 'VIEW' ? 'view' : 'table',
+        });
+      }
+    }
+
+    if (scopes.comments) {
+      const tableComments = await this.rows(
+        `SELECT table_schema AS s, table_name AS n, table_type AS t, table_comment AS c
+           FROM information_schema.tables
+          WHERE table_schema IN (${marks}) AND table_comment LIKE ? ESCAPE '\\\\'
+                AND NOT (table_type = 'VIEW' AND table_comment = 'VIEW')
+          ORDER BY table_schema, table_name LIMIT ${limit}`,
+        [...schemas, like],
+      );
+      for (const x of tableComments) {
+        hits.push({ kind: x.t === 'VIEW' ? 'view' : 'table', schema: x.s, table: x.n, name: x.n, matchedIn: 'comment', text: x.c });
+      }
+      const columnComments = await this.rows(
+        `SELECT table_schema AS s, table_name AS n, column_name AS col, column_comment AS c
+           FROM information_schema.columns
+          WHERE table_schema IN (${marks}) AND column_comment LIKE ? ESCAPE '\\\\'
+          ORDER BY table_schema, table_name LIMIT ${limit}`,
+        [...schemas, like],
+      );
+      for (const x of columnComments) {
+        hits.push({ kind: 'column', schema: x.s, table: x.n, name: x.col, matchedIn: 'comment', text: x.c });
+      }
+    }
+
+    if (scopes.source) {
+      const views = await this.rows(
+        `SELECT table_schema AS s, table_name AS n, view_definition AS d
+           FROM information_schema.views
+          WHERE table_schema IN (${marks}) AND view_definition LIKE ? ESCAPE '\\\\'
+          ORDER BY table_schema, table_name LIMIT ${limit}`,
+        [...schemas, like],
+      );
+      for (const x of views) {
+        hits.push({ kind: 'view', schema: x.s, table: x.n, name: x.n, matchedIn: 'source', text: x.d });
+      }
+      const routines = await this.rows(
+        `SELECT routine_schema AS s, routine_name AS n, routine_type AS t, routine_definition AS d
+           FROM information_schema.routines
+          WHERE routine_schema IN (${marks}) AND routine_definition LIKE ? ESCAPE '\\\\'
+          ORDER BY routine_schema, routine_name LIMIT ${limit}`,
+        [...schemas, like],
+      );
+      // 주의: MySQL·MariaDB 는 프로시저·함수 본문을 저장할 때 주석을 모두 지운다.
+      // (SHOW CREATE PROCEDURE 에도 남지 않아 서버에 아예 없는 정보다.)
+      // 따라서 루틴 안의 주석은 검색되지 않는다. PostgreSQL 은 원본 그대로 남아 검색된다.
+      for (const x of routines) {
+        hits.push({ kind: 'routine', schema: x.s, name: x.n, matchedIn: 'source', detail: x.t, text: x.d });
+      }
+      const triggers = await this.rows(
+        `SELECT trigger_schema AS s, trigger_name AS n, event_object_table AS tb, action_statement AS d
+           FROM information_schema.triggers
+          WHERE trigger_schema IN (${marks}) AND action_statement LIKE ? ESCAPE '\\\\'
+          ORDER BY trigger_schema, trigger_name LIMIT ${limit}`,
+        [...schemas, like],
+      );
+      for (const x of triggers) {
+        hits.push({ kind: 'trigger', schema: x.s, table: x.tb, name: x.n, matchedIn: 'source', text: x.d });
+      }
+    }
+
+    return hits;
   }
 
   // ---- 실행 계획 -------------------------------------------------------------

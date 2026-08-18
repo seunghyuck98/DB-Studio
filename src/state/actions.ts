@@ -1,6 +1,6 @@
 import type { ConnectionConfig, DatabaseMeta, SchemaMeta, TableMeta } from '../types';
 import {
-  getState, setState, setNode, setExpanded, setSession, notify,
+  getState, setState, setNode, setExpanded, setSession, setSearch, notify,
   closeTabsOfConnection, type TreeItem,
 } from './store';
 
@@ -191,6 +191,38 @@ export async function switchDatabase(connectionId: string, database: string): Pr
     }
     return { nodes };
   });
+}
+
+// ---- 객체 검색 ---------------------------------------------------------------
+
+/**
+ * 이름·컬럼·주석·정의 스크립트에서 객체를 찾는다.
+ * 대상 스키마는 "현재 스키마만" 또는 접속의 모든 스키마 중에서 고른다.
+ */
+export async function runSearch(connectionId: string, term: string): Promise<void> {
+  const s = getState();
+  const { scopes, allSchemas } = s.search;
+  const session = s.sessions[connectionId];
+  if (!session?.connected) {
+    setSearch({ error: '접속을 먼저 열어야 검색할 수 있습니다.', result: null });
+    return;
+  }
+
+  setSearch({ running: true, error: null });
+  try {
+    let schemas: string[] | undefined;
+    if (allSchemas) {
+      // MySQL 은 데이터베이스가 곧 스키마라서 목록을 그대로 쓴다.
+      const list: { name: string }[] = session.hasSchemaLevel
+        ? await api().meta.get(connectionId, 'schemas')
+        : await api().meta.get(connectionId, 'databases');
+      schemas = list.map((x) => x.name);
+    }
+    const result = await api().meta.search(connectionId, { term, schemas, scopes });
+    setSearch({ running: false, result, error: null });
+  } catch (e) {
+    setSearch({ running: false, result: null, error: message(e) });
+  }
 }
 
 // ---- 트랜잭션 ---------------------------------------------------------------

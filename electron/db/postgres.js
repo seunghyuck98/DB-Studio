@@ -1,6 +1,7 @@
 'use strict';
 
 const { Client } = require('pg');
+const { likePattern } = require('./searchutil');
 
 /**
  * PostgreSQL 드라이버.
@@ -351,6 +352,117 @@ class PostgresDriver {
         .join('\n');
     }
     return ddl;
+  }
+
+  // ---- 객체 검색 -------------------------------------------------------------
+
+  /**
+   * 이름·컬럼·주석·정의 스크립트에서 검색어를 찾는다.
+   * @param {string} term
+   * @param {{schemas:string[], scopes:{names?:boolean,columns?:boolean,comments?:boolean,source?:boolean}, limit?:number}} opts
+   */
+  async searchObjects(term, opts) {
+    const like = likePattern(term);
+    const schemas = opts.schemas;
+    const scopes = opts.scopes || {};
+    const limit = Number(opts.limit) || 200;
+    const hits = [];
+
+    if (scopes.names) {
+      const r = await this.rows(
+        `SELECT n.nspname AS s, c.relname AS n,
+                CASE WHEN c.relkind IN ('v','m') THEN 'view' ELSE 'table' END AS t
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = ANY($1) AND c.relkind IN ('r','p','v','m','f')
+            AND c.relname ILIKE $2
+          ORDER BY n.nspname, c.relname LIMIT ${limit}`,
+        [schemas, like],
+      );
+      for (const x of r) hits.push({ kind: x.t, schema: x.s, table: x.n, name: x.n, matchedIn: 'name' });
+    }
+
+    if (scopes.columns) {
+      const r = await this.rows(
+        `SELECT n.nspname AS s, c.relname AS n, a.attname AS col,
+                format_type(a.atttypid, a.atttypmod) AS ct,
+                CASE WHEN c.relkind IN ('v','m') THEN 'view' ELSE 'table' END AS t
+           FROM pg_attribute a
+           JOIN pg_class c ON c.oid = a.attrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = ANY($1) AND c.relkind IN ('r','p','v','m','f')
+            AND a.attnum > 0 AND NOT a.attisdropped AND a.attname ILIKE $2
+          ORDER BY n.nspname, c.relname, a.attnum LIMIT ${limit}`,
+        [schemas, like],
+      );
+      for (const x of r) {
+        hits.push({ kind: 'column', schema: x.s, table: x.n, name: x.col, matchedIn: 'column', detail: x.ct, objectKind: x.t });
+      }
+    }
+
+    if (scopes.comments) {
+      const tableComments = await this.rows(
+        `SELECT n.nspname AS s, c.relname AS n, obj_description(c.oid, 'pg_class') AS cm,
+                CASE WHEN c.relkind IN ('v','m') THEN 'view' ELSE 'table' END AS t
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = ANY($1) AND c.relkind IN ('r','p','v','m','f')
+            AND obj_description(c.oid, 'pg_class') ILIKE $2
+          ORDER BY n.nspname, c.relname LIMIT ${limit}`,
+        [schemas, like],
+      );
+      for (const x of tableComments) {
+        hits.push({ kind: x.t, schema: x.s, table: x.n, name: x.n, matchedIn: 'comment', text: x.cm });
+      }
+      const columnComments = await this.rows(
+        `SELECT n.nspname AS s, c.relname AS n, a.attname AS col,
+                col_description(a.attrelid, a.attnum) AS cm
+           FROM pg_attribute a
+           JOIN pg_class c ON c.oid = a.attrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = ANY($1) AND a.attnum > 0 AND NOT a.attisdropped
+            AND col_description(a.attrelid, a.attnum) ILIKE $2
+          ORDER BY n.nspname, c.relname, a.attnum LIMIT ${limit}`,
+        [schemas, like],
+      );
+      for (const x of columnComments) {
+        hits.push({ kind: 'column', schema: x.s, table: x.n, name: x.col, matchedIn: 'comment', text: x.cm });
+      }
+    }
+
+    if (scopes.source) {
+      const views = await this.rows(
+        `SELECT n.nspname AS s, c.relname AS n, pg_get_viewdef(c.oid, true) AS d
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = ANY($1) AND c.relkind IN ('v','m')
+            AND pg_get_viewdef(c.oid, true) ILIKE $2
+          ORDER BY n.nspname, c.relname LIMIT ${limit}`,
+        [schemas, like],
+      );
+      for (const x of views) hits.push({ kind: 'view', schema: x.s, table: x.n, name: x.n, matchedIn: 'source', text: x.d });
+
+      const routines = await this.rows(
+        `SELECT n.nspname AS s, p.proname AS n, p.prosrc AS d,
+                CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS t
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = ANY($1) AND p.prosrc ILIKE $2
+          ORDER BY n.nspname, p.proname LIMIT ${limit}`,
+        [schemas, like],
+      );
+      for (const x of routines) hits.push({ kind: 'routine', schema: x.s, name: x.n, matchedIn: 'source', detail: x.t, text: x.d });
+
+      const triggers = await this.rows(
+        `SELECT n.nspname AS s, t.tgname AS n, c.relname AS tb, pg_get_triggerdef(t.oid) AS d
+           FROM pg_trigger t
+           JOIN pg_class c ON c.oid = t.tgrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE NOT t.tgisinternal AND n.nspname = ANY($1)
+            AND pg_get_triggerdef(t.oid) ILIKE $2
+          ORDER BY n.nspname, t.tgname LIMIT ${limit}`,
+        [schemas, like],
+      );
+      for (const x of triggers) hits.push({ kind: 'trigger', schema: x.s, table: x.tb, name: x.n, matchedIn: 'source', text: x.d });
+    }
+
+    return hits;
   }
 
   // ---- 실행 계획 -------------------------------------------------------------

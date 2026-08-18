@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ExportButton from './ExportButton';
+import RecordView from './RecordView';
 import { getTabScratch, setTabScratch, notify, setSession, getState } from '../state/store';
 import { message } from '../state/actions';
 import type { QueryResult, TableColumn, TableTab } from '../types';
 
 interface OrderBy { column: string; direction: 'asc' | 'desc' }
+interface CellPos { row: number; col: number; insert: boolean }
 
 const PAGE_SIZES = [100, 200, 500, 1000];
 
@@ -25,8 +27,13 @@ export default function DataTab({ tab }: { tab: TableTab }) {
   const [edits, setEdits] = useState<Record<number, Record<number, unknown>>>({});
   const [deleted, setDeleted] = useState<Record<number, true>>({});
   const [inserts, setInserts] = useState<Record<string, unknown>[]>([]);
-  const [editing, setEditing] = useState<{ row: number; col: number; insert: boolean } | null>(null);
+  // 선택(한 번 클릭)과 편집(더블클릭)은 서로 다른 상태다.
+  // 선택은 행 삭제 표시와 레코드(세로) 보기의 기준이 된다.
+  const [selection, setSelection] = useState<CellPos | null>(null);
+  const [editing, setEditing] = useState<CellPos | null>(null);
+  const [recordMode, setRecordMode] = useState<boolean>(() => getTabScratch(tab.id, 'recordMode', false));
   const [saving, setSaving] = useState(false);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setTabScratch(tab.id, 'limit', limit); }, [tab.id, limit]);
   useEffect(() => { setTabScratch(tab.id, 'offset', offset); }, [tab.id, offset]);
@@ -37,11 +44,14 @@ export default function DataTab({ tab }: { tab: TableTab }) {
   const editable = tab.objectKind === 'table' && pkColumns.length > 0;
   const dirty = Object.keys(edits).length > 0 || Object.keys(deleted).length > 0 || inserts.length > 0;
 
+  useEffect(() => { setTabScratch(tab.id, 'recordMode', recordMode); }, [tab.id, recordMode]);
+
   const resetEdits = useCallback(() => {
     setEdits({});
     setDeleted({});
     setInserts([]);
     setEditing(null);
+    setSelection(null);
   }, []);
 
   const load = useCallback(async (nextOffset = offset, nextFilter = appliedFilter, nextOrder = orderBy) => {
@@ -170,6 +180,52 @@ export default function DataTab({ tab }: { tab: TableTab }) {
   const rowCount = result?.rows.length ?? 0;
   const pageEnd = offset + rowCount;
 
+  // ---- 레코드(세로) 보기용 파생값 ----
+  const recordColumns = useMemo(
+    () => cols.map((c) => {
+      const meta = columns.find((m) => m.name === c.name);
+      return { name: c.name, type: meta?.dataType ?? c.type, primaryKey: meta?.primaryKey };
+    }),
+    [cols, columns],
+  );
+
+  const recordValues = useMemo<unknown[]>(() => {
+    if (!selection || !result) return [];
+    if (selection.insert) {
+      const values = inserts[selection.row] ?? {};
+      return cols.map((c) => (c.name in values ? values[c.name] : undefined));
+    }
+    const row = result.rows[selection.row];
+    if (!row) return [];
+    const rowEdits = edits[selection.row];
+    return row.map((v, i) => (rowEdits && i in rowEdits ? rowEdits[i] : v));
+  }, [selection, result, inserts, cols, edits]);
+
+  const recordEditedColumns = useMemo(() => {
+    if (!selection) return new Set<number>();
+    if (selection.insert) {
+      const values = inserts[selection.row] ?? {};
+      return new Set(cols.map((c, i) => (c.name in values ? i : -1)).filter((i) => i >= 0));
+    }
+    return new Set(Object.keys(edits[selection.row] ?? {}).map(Number));
+  }, [selection, inserts, cols, edits]);
+
+  const recordUnsetColumns = useMemo(() => {
+    if (!selection?.insert) return undefined;
+    const values = inserts[selection.row] ?? {};
+    return new Set(cols.map((c, i) => (c.name in values ? -1 : i)).filter((i) => i >= 0));
+  }, [selection, inserts, cols]);
+
+  // 선택한 행이 사라지면(재조회·행 제거) 세로 보기를 닫는다.
+  useEffect(() => {
+    if (!selection) return;
+    const max = selection.insert ? inserts.length : rowCount;
+    if (selection.row >= max) {
+      setSelection(null);
+      setRecordMode(false);
+    }
+  }, [selection, inserts.length, rowCount]);
+
   return (
     <div className="data-tab">
       <div className="data-toolbar">
@@ -195,6 +251,14 @@ export default function DataTab({ tab }: { tab: TableTab }) {
           {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}행</option>)}
         </select>
         <button className="btn small" onClick={() => void countRows()}>행 수 세기</button>
+        <button
+          className={`btn small ${recordMode ? 'primary' : ''}`}
+          disabled={!selection}
+          title="선택한 행을 세로로 보기 (Tab)"
+          onClick={() => setRecordMode((v) => !v)}
+        >
+          {recordMode ? '그리드' : '세로 보기'}
+        </button>
         <ExportButton
           defaultName={`${tab.schema}.${tab.table}`}
           current={result ? { columns: result.columns, rows: result.rows } : null}
@@ -212,8 +276,8 @@ export default function DataTab({ tab }: { tab: TableTab }) {
             <button className="btn small" onClick={() => setInserts((p) => [...p, {}])}>+ 행 추가</button>
             <button
               className="btn small"
-              disabled={!editing || editing.insert}
-              onClick={() => editing && setDeleted((p) => ({ ...p, [editing.row]: true }))}
+              disabled={!selection || selection.insert}
+              onClick={() => selection && setDeleted((p) => ({ ...p, [selection.row]: true }))}
             >
               − 행 삭제 표시
             </button>
@@ -235,8 +299,43 @@ export default function DataTab({ tab }: { tab: TableTab }) {
       {loading && <div className="pane-message">조회 중…</div>}
       {error && <div className="pane-message error">{error}</div>}
 
-      {result && !loading && (
-        <div className="grid-scroll">
+      {result && !loading && recordMode && selection && (
+        <RecordView
+          columns={recordColumns}
+          values={recordValues}
+          rowNumber={selection.insert ? selection.row + 1 : selection.row + 1}
+          totalRows={selection.insert ? inserts.length : rowCount}
+          onPrev={() => setSelection((s) => (s ? { ...s, row: Math.max(0, s.row - 1) } : s))}
+          onNext={() => setSelection((s) => {
+            if (!s) return s;
+            const max = (s.insert ? inserts.length : rowCount) - 1;
+            return { ...s, row: Math.min(max, s.row + 1) };
+          })}
+          onExitRecordMode={() => setRecordMode(false)}
+          editable={editable && !(selection && !selection.insert && deleted[selection.row])}
+          editedColumns={recordEditedColumns}
+          unsetColumns={recordUnsetColumns}
+          onCommit={(colIdx, raw, isNull) => {
+            if (!selection) return;
+            if (selection.insert) setInsertCell(selection.row, cols[colIdx].name, raw, isNull);
+            else setCell(selection.row, colIdx, raw, isNull);
+          }}
+        />
+      )}
+
+      {result && !loading && !(recordMode && selection) && (
+        <div
+          className="grid-scroll"
+          ref={gridRef}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            // Tab 은 원래 포커스를 옮기지만, 그리드에서는 세로 보기 전환으로 쓴다 (DBeaver 와 동일).
+            if (e.key === 'Tab' && !editing && selection) {
+              e.preventDefault();
+              setRecordMode(true);
+            }
+          }}
+        >
           <table className="data-grid">
             <thead>
               <tr>
@@ -259,56 +358,66 @@ export default function DataTab({ tab }: { tab: TableTab }) {
               </tr>
             </thead>
             <tbody>
-              {result.rows.map((row, rowIdx) => (
-                <tr key={rowIdx} className={deleted[rowIdx] ? 'deleted' : ''}>
-                  <td className="rownum">{offset + rowIdx + 1}</td>
-                  {row.map((value, colIdx) => {
-                    const edited = edits[rowIdx] && colIdx in edits[rowIdx];
-                    const shown = edited ? edits[rowIdx][colIdx] : value;
-                    const isEditing = editing?.row === rowIdx && editing?.col === colIdx && !editing.insert;
-                    return (
-                      <Cell
-                        key={colIdx}
-                        value={shown}
-                        edited={!!edited}
-                        editable={editable && !deleted[rowIdx]}
-                        editing={isEditing}
-                        onSelect={() => setEditing({ row: rowIdx, col: colIdx, insert: false })}
-                        onStartEdit={() => setEditing({ row: rowIdx, col: colIdx, insert: false })}
-                        onCommit={(raw, isNull) => { setCell(rowIdx, colIdx, raw, isNull); setEditing(null); }}
-                        onCancel={() => setEditing(null)}
-                      />
-                    );
-                  })}
-                </tr>
-              ))}
-              {inserts.map((values, insertIdx) => (
-                <tr key={`new-${insertIdx}`} className="inserted">
-                  <td className="rownum">
-                    <button
-                      className="icon-btn"
-                      title="이 행 제거"
-                      onClick={() => setInserts((p) => p.filter((_, i) => i !== insertIdx))}
-                    >×</button>
-                  </td>
-                  {cols.map((c, colIdx) => {
-                    const isEditing = editing?.row === insertIdx && editing?.col === colIdx && editing.insert;
-                    return (
-                      <Cell
-                        key={c.name}
-                        value={c.name in values ? values[c.name] : undefined}
-                        edited={c.name in values}
-                        editable
-                        editing={isEditing}
-                        onSelect={() => setEditing({ row: insertIdx, col: colIdx, insert: true })}
-                        onStartEdit={() => setEditing({ row: insertIdx, col: colIdx, insert: true })}
-                        onCommit={(raw, isNull) => { setInsertCell(insertIdx, c.name, raw, isNull); setEditing(null); }}
-                        onCancel={() => setEditing(null)}
-                      />
-                    );
-                  })}
-                </tr>
-              ))}
+              {result.rows.map((row, rowIdx) => {
+                const rowSelected = selection && !selection.insert && selection.row === rowIdx;
+                return (
+                  <tr key={rowIdx} className={`${deleted[rowIdx] ? 'deleted' : ''} ${rowSelected ? 'row-selected' : ''}`}>
+                    <td className="rownum">{offset + rowIdx + 1}</td>
+                    {row.map((value, colIdx) => {
+                      const edited = edits[rowIdx] && colIdx in edits[rowIdx];
+                      const shown = edited ? edits[rowIdx][colIdx] : value;
+                      const pos = { row: rowIdx, col: colIdx, insert: false };
+                      const isEditing = editing?.row === rowIdx && editing?.col === colIdx && !editing.insert;
+                      return (
+                        <Cell
+                          key={colIdx}
+                          value={shown}
+                          edited={!!edited}
+                          selected={!!rowSelected && selection?.col === colIdx}
+                          editable={editable && !deleted[rowIdx]}
+                          editing={isEditing}
+                          onSelect={() => { setSelection(pos); gridRef.current?.focus(); }}
+                          onStartEdit={() => { setSelection(pos); setEditing(pos); }}
+                          onCommit={(raw, isNull) => { setCell(rowIdx, colIdx, raw, isNull); setEditing(null); }}
+                          onCancel={() => setEditing(null)}
+                        />
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+              {inserts.map((values, insertIdx) => {
+                const rowSelected = selection?.insert && selection.row === insertIdx;
+                return (
+                  <tr key={`new-${insertIdx}`} className={`inserted ${rowSelected ? 'row-selected' : ''}`}>
+                    <td className="rownum">
+                      <button
+                        className="icon-btn"
+                        title="이 행 제거"
+                        onClick={() => setInserts((p) => p.filter((_, i) => i !== insertIdx))}
+                      >×</button>
+                    </td>
+                    {cols.map((c, colIdx) => {
+                      const pos = { row: insertIdx, col: colIdx, insert: true };
+                      const isEditing = editing?.row === insertIdx && editing?.col === colIdx && editing.insert;
+                      return (
+                        <Cell
+                          key={c.name}
+                          value={c.name in values ? values[c.name] : undefined}
+                          edited={c.name in values}
+                          selected={!!rowSelected && selection?.col === colIdx}
+                          editable
+                          editing={isEditing}
+                          onSelect={() => { setSelection(pos); gridRef.current?.focus(); }}
+                          onStartEdit={() => { setSelection(pos); setEditing(pos); }}
+                          onCommit={(raw, isNull) => { setInsertCell(insertIdx, c.name, raw, isNull); setEditing(null); }}
+                          onCancel={() => setEditing(null)}
+                        />
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {rowCount === 0 && inserts.length === 0 && <div className="pane-message muted">표시할 행이 없습니다.</div>}
@@ -321,6 +430,7 @@ export default function DataTab({ tab }: { tab: TableTab }) {
 interface CellProps {
   value: unknown;
   edited: boolean;
+  selected?: boolean;
   editable: boolean;
   editing: boolean;
   onSelect: () => void;
@@ -329,7 +439,7 @@ interface CellProps {
   onCancel: () => void;
 }
 
-function Cell({ value, edited, editable, editing, onSelect, onStartEdit, onCommit, onCancel }: CellProps) {
+function Cell({ value, edited, selected, editable, editing, onSelect, onStartEdit, onCommit, onCancel }: CellProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState('');
 
@@ -362,7 +472,7 @@ function Cell({ value, edited, editable, editing, onSelect, onStartEdit, onCommi
   const isUnset = value === undefined;
   return (
     <td
-      className={`${edited ? 'edited' : ''} ${isNull ? 'null' : ''}`}
+      className={`${edited ? 'edited' : ''} ${isNull ? 'null' : ''} ${selected ? 'cell-selected' : ''}`}
       onClick={onSelect}
       onDoubleClick={() => editable && onStartEdit()}
       title={isNull ? 'NULL' : String(value ?? '')}

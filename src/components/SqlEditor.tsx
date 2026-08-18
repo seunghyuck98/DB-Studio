@@ -95,17 +95,6 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
     ])),
   ], [dialect]);
 
-  // 트리 컨텍스트 메뉴에서 보낸 SQL 을 편집기에 넣는다.
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<string>).detail;
-      if (getState().activeTabId !== tab.id) return;
-      setText((prev) => (prev ? `${prev}\n${detail}` : detail));
-    };
-    window.addEventListener('dbstudio:insert-sql', handler);
-    return () => window.removeEventListener('dbstudio:insert-sql', handler);
-  }, [tab.id]);
-
   const current = results[activeResult];
 
   return (
