@@ -12,6 +12,8 @@
     "build": "vite build",
     "start": "npm run build && electron .",
     "update": "git pull --ff-only && npm install && npm start",
+    "app": "npm run pack && node scripts/install-app.js",
+    "update:app": "git pull --ff-only && npm install && npm run app",
     "typecheck": "tsc --noEmit",
     "icons": "node scripts/make-icon.js",
     "pack": "npm run build && electron-builder --dir",

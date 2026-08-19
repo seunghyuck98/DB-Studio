@@ -46,6 +46,28 @@ npm run update
 `git pull --ff-only` 이므로 로컬에 아직 안 올린 커밋이 있으면 덮어쓰지 않고 멈춘다.
 그럴 때는 먼저 정리한 뒤 다시 실행한다.
 
+### Dock 에 고정해 쓰기 (macOS)
+
+`npm run update` 는 소스 실행이라 터미널에 묶인다. 평소에 앱처럼 쓰려면 한 번 설치해 둔다.
+
+```bash
+npm run app          # 빌드 + ~/Applications/DB Studio.app 에 설치
+```
+
+Finder 에서 `~/Applications/DB Studio.app` 을 열고 Dock 에 고정한다.
+다음부터 갱신은 이 한 줄이고, **Dock 고정은 그대로 유지된다.**
+
+```bash
+npm run update:app   # 받아오기 + 설치 + 갱신
+```
+
+`release/` 안의 앱을 직접 Dock 에 고정하면 안 된다.
+electron-builder 는 재빌드마다 그 번들을 통째로 지웠다 새로 만들어서 고정이 끊긴다.
+`npm run app` 은 설치본의 번들 디렉터리는 그대로 두고 내용만 덮어쓰기 때문에 고정이 살아남는다.
+
+- 앱이 실행 중이면 덮어쓰지 않고 멈춘다. 완전히 종료한 뒤 다시 실행한다.
+- 설치 위치를 바꾸려면 `DBSTUDIO_APP_DIR=/Applications npm run app` 처럼 지정한다.
+
 ## 구현된 기능
 
 | 요구사항 | 구현 |
@@ -277,6 +299,7 @@ electron/
     sqlparse.js    SQL 문장 분리 (문자열·주석·달러 인용 인식)
 scripts/
   make-icon.js     build/icon.png 생성
+  install-app.js   빌드한 앱을 ~/Applications 에 설치 (번들을 유지해 Dock 고정을 지킨다)
 src/
   state/           전역 스토어와 액션
   components/      UI (ContextMenu 는 트리·탭이 함께 쓰는 우클릭 메뉴)
@@ -316,6 +339,9 @@ DB 접근은 전부 메인 프로세스에서 일어나고, 렌더러는 `contex
 
 아이콘을 바꾸려면 `scripts/make-icon.js` 를 고치고 `npm run icons` 를 실행한다.
 직접 만든 PNG 로 갈아 끼워도 된다 (1024×1024 권장).
+
+`build/icon.png` 은 `npm run icons` 를 실행할 때만 만들어진다. 일반 빌드는 이 파일을 건드리지 않고,
+electron-builder 가 이걸로 `icon.icns` 를 만들 뿐이다 (내용이 같으면 결과도 같다).
 
 ## 아직 없는 것
 
