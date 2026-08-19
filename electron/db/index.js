@@ -420,7 +420,7 @@ async function applyChanges(id, { schema, table, changes }) {
 async function executeScript(id, sql, opts = {}) {
   const s = get(id);
   const stopOnError = opts.stopOnError !== false;
-  const statements = splitStatements(sql);
+  const statements = splitStatements(sql, { blankLine: !!opts.splitOnBlankLine });
   const results = [];
 
   for (const stmt of statements) {
@@ -497,7 +497,7 @@ async function searchObjects(id, req) {
 /** 문장의 실행 계획을 가져온다. analyze 를 켜면 쿼리가 실제로 실행된다. */
 async function explain(id, sql, opts = {}) {
   const s = get(id);
-  const stmt = splitStatements(sql)[0];
+  const stmt = splitStatements(sql, { blankLine: !!opts.splitOnBlankLine })[0];
   if (!stmt) throw new Error('실행 계획을 볼 문장이 없습니다.');
   await s.ensureTx();
   const started = Date.now();

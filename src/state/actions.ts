@@ -18,6 +18,26 @@ export const nodeId = {
 
 // ---- 접속 -------------------------------------------------------------------
 
+/** 저장해 둔 설정을 읽어 화면 상태에 반영한다. */
+export async function loadSettings(): Promise<void> {
+  try {
+    const s = await api().settings.get();
+    setState({ splitOnBlankLine: !!s.splitOnBlankLine });
+  } catch (e) {
+    notify('error', message(e));
+  }
+}
+
+/** 문장 구분 방식을 바꾸고 설정 파일에도 남긴다. */
+export async function setSplitOnBlankLine(value: boolean): Promise<void> {
+  setState({ splitOnBlankLine: value });
+  try {
+    await api().settings.set({ splitOnBlankLine: value });
+  } catch (e) {
+    notify('error', message(e));
+  }
+}
+
 export async function loadConnections(): Promise<void> {
   try {
     setState({ connections: await api().connections.list() });

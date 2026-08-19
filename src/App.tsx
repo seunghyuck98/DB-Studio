@@ -14,14 +14,14 @@ import PasswordDialog from './components/PasswordDialog';
 import TxConfirmDialog from './components/TxConfirmDialog';
 import Toaster from './components/Toaster';
 import { useAppState, activeTab, activeConnectionId, setState, openSqlTab } from './state/store';
-import { loadConnections, commit, rollback, setAutoCommit } from './state/actions';
+import { loadConnections, loadSettings, commit, rollback, setAutoCommit } from './state/actions';
 
 export default function App() {
   const state = useAppState();
   const tab = activeTab(state);
   const connId = activeConnectionId(state);
 
-  useEffect(() => { void loadConnections(); }, []);
+  useEffect(() => { void loadConnections(); void loadSettings(); }, []);
 
   // 애플리케이션 메뉴에서 오는 명령 처리 (preload 가 없으면 조용히 넘어간다)
   useEffect(() => {

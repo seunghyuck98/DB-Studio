@@ -202,6 +202,7 @@ body {
 .context-menu button:hover:not(:disabled) { background: var(--accent-dim); }
 .context-menu button:disabled { color: var(--text-faint); cursor: default; }
 .context-menu button.danger { color: #ef8080; }
+.context-menu li.separated { border-top: 1px solid var(--border-soft); margin-top: 4px; padding-top: 4px; }
 
 /* ---- 탭 ------------------------------------------------------------------- */
 
@@ -238,7 +239,9 @@ body {
 
 /* ---- 테이블 편집기 --------------------------------------------------------- */
 
-.table-editor, .sql-editor { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+/* min-height: 0 이 없으면 flex 항목이 내용 크기 아래로 줄지 못해
+   긴 SQL·큰 결과가 영역 밖으로 잘리고 스크롤바도 생기지 않는다. */
+.table-editor, .sql-editor { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .section-tabs { display: flex; gap: 2px; padding: 4px 8px 0; border-bottom: 1px solid var(--border); background: var(--bg); }
 .section-tab {
   background: none; border: none; border-bottom: 2px solid transparent;
@@ -332,10 +335,21 @@ body {
 /* ---- SQL 편집기 ----------------------------------------------------------- */
 
 .sql-toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border-soft); }
+/* 편집기와 결과는 각자 자기 영역 안에서 스크롤한다.
+   flex-basis 로 비율을 잡되 min-height 로 최소 높이를 보장한다. */
 .sql-body { flex: 1 1 45%; min-height: 120px; overflow: hidden; border-bottom: 1px solid var(--border); }
+/* react-codemirror 이 감싸는 래퍼 div 에는 높이가 없어서, 그대로 두면 편집기가
+   내용만큼 자라 영역을 넘고 잘린다. 래퍼를 채워야 CodeMirror 가 내부에서 스크롤한다. */
+.sql-body > div { height: 100%; }
 .sql-body .cm-editor { height: 100%; user-select: text; }
-.sql-body .cm-scroller { font-family: var(--mono); font-size: 13px; }
+.sql-body .cm-scroller { font-family: var(--mono); font-size: 13px; overflow: auto; }
 .sql-results { flex: 1 1 55%; min-height: 120px; display: flex; flex-direction: column; overflow: hidden; }
+/* 편집기와 결과 사이를 끌어서 비율을 바꾼다. */
+.sql-splitter {
+  flex: 0 0 6px; cursor: row-resize; background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+.sql-splitter:hover, .sql-splitter.dragging { background: var(--accent-dim); }
 .result-tabs { display: flex; gap: 2px; padding: 4px 8px; border-bottom: 1px solid var(--border-soft); }
 .result-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .result-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border-soft); }
@@ -706,8 +720,9 @@ body {
 .meta-table tr.deleted td { text-decoration: line-through; background: rgba(240, 71, 71, .14); }
 .meta-table tr.inserted td { background: rgba(63, 185, 80, .12); }
 .ddl-editor { flex: 1; min-height: 0; overflow: hidden; }
+.ddl-editor > div { height: 100%; }
 .ddl-editor .cm-editor { height: 100%; user-select: text; }
-.ddl-editor .cm-scroller { font-family: var(--mono); font-size: 13px; }
+.ddl-editor .cm-scroller { font-family: var(--mono); font-size: 13px; overflow: auto; }
 
 .modal.wide { width: 720px; }
 .scroll-box { max-height: 46vh; overflow: auto; }

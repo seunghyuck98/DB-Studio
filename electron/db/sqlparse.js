@@ -1,14 +1,23 @@
 'use strict';
 
+/** 주석과 앞쪽 공백을 걷어낸 문장 앞부분 */
+function strippedHead(sql) {
+  return String(sql)
+    .replace(/^(?:\s|--[^\n]*\n?|#[^\n]*\n?|\/\*[\s\S]*?\*\/)*/, '')
+    .toLowerCase();
+}
+
 /**
  * SQL 스크립트를 개별 문장으로 분리한다.
  * 문자열 리터럴, 식별자 인용부호, 라인/블록 주석, PostgreSQL 달러 인용($$ ... $$)을
- * 인식하므로 그 안에 있는 세미콜론은 구분자로 취급하지 않는다.
+ * 인식하므로 그 안에 있는 세미콜론이나 빈 줄은 구분자로 취급하지 않는다.
  *
  * @param {string} script
+ * @param {{ blankLine?: boolean }} [opts] blankLine 을 켜면 빈 줄도 문장 구분자로 본다.
  * @returns {{ text: string, start: number, end: number }[]}
  */
-function splitStatements(script) {
+function splitStatements(script, opts = {}) {
+  const blankLine = !!opts.blankLine;
   const out = [];
   let i = 0;
   let stmtStart = 0;
@@ -16,7 +25,11 @@ function splitStatements(script) {
 
   const push = (endExclusive) => {
     const raw = script.slice(stmtStart, endExclusive);
-    if (raw.trim()) out.push({ text: raw.trim(), start: stmtStart, end: endExclusive });
+    if (!raw.trim()) return;
+    // 주석과 공백만 남은 조각은 실행 대상이 아니다.
+    // (그대로 보내면 MySQL 은 "Query was empty" 로 실패한다)
+    if (!strippedHead(raw)) return;
+    out.push({ text: raw.trim(), start: stmtStart, end: endExclusive });
   };
 
   while (i < len) {
@@ -67,6 +80,20 @@ function splitStatements(script) {
       stmtStart = i;
       continue;
     }
+
+    // 빈 줄 구분자 (문자열·주석 안이 아닌 곳에서만 여기까지 온다)
+    if (blankLine && c === '\n') {
+      let j = i + 1;
+      while (j < len && (script[j] === ' ' || script[j] === '\t' || script[j] === '\r')) j++;
+      if (j >= len || script[j] === '\n') {
+        push(i);
+        // 이어지는 빈 줄들을 건너뛰고 다음 문장의 첫 글자에서 시작한다.
+        i = j;
+        while (i < len && /\s/.test(script[i])) i++;
+        stmtStart = i;
+        continue;
+      }
+    }
     i++;
   }
   push(len);
@@ -77,21 +104,15 @@ function splitStatements(script) {
  * 커서 위치를 포함하는 문장을 찾는다. 없으면 커서 직전의 마지막 문장을 반환한다.
  * @param {string} script
  * @param {number} caret
+ * @param {{ blankLine?: boolean }} [opts]
  */
-function statementAt(script, caret) {
-  const stmts = splitStatements(script);
+function statementAt(script, caret, opts = {}) {
+  const stmts = splitStatements(script, opts);
   if (stmts.length === 0) return null;
   for (const s of stmts) {
     if (caret >= s.start && caret <= s.end) return s;
   }
   return stmts[stmts.length - 1];
-}
-
-/** 주석과 앞쪽 공백을 걷어낸 문장 앞부분 */
-function strippedHead(sql) {
-  return String(sql)
-    .replace(/^(?:\s|--[^\n]*\n?|#[^\n]*\n?|\/\*[\s\S]*?\*\/)*/, '')
-    .toLowerCase();
 }
 
 /** 결과셋을 돌려주는 문장인지 대략 판별한다. */

@@ -308,7 +308,7 @@ declare global {
       };
       sql: {
         execute(id: string, sql: string, opts?: Record<string, unknown>): Promise<{ results: StatementResult[]; status: SessionStatus }>;
-        explain(id: string, sql: string, opts?: { analyze?: boolean }): Promise<ExplainResult>;
+        explain(id: string, sql: string, opts?: { analyze?: boolean; splitOnBlankLine?: boolean }): Promise<ExplainResult>;
       };
       ddl: {
         preview(id: string, args: { schema: string; table: string; spec: ColumnChangeSpec }): Promise<string[]>;
@@ -327,6 +327,10 @@ declare global {
           format: ExportFormat; defaultName: string;
           options?: { delimiter?: string; header?: boolean; nullText?: string; bom?: boolean };
         }): Promise<ExportResult>;
+      };
+      settings: {
+        get(): Promise<{ splitOnBlankLine: boolean }>;
+        set(patch: Partial<{ splitOnBlankLine: boolean }>): Promise<{ splitOnBlankLine: boolean }>;
       };
       history: {
         list(query?: { search?: string; connectionId?: string; onlyErrors?: boolean; limit?: number; offset?: number }):

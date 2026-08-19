@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql, MySQL, PostgreSQL } from '@codemirror/lang-sql';
 import { EditorView, keymap } from '@codemirror/view';
 import { Prec, type Extension } from '@codemirror/state';
 import ResultGrid from './ResultGrid';
 import PlanView from './PlanView';
-import { getTabScratch, setTabScratch, setSession, notify, sessionOf, getState } from '../state/store';
-import { message } from '../state/actions';
+import { getTabScratch, setTabScratch, setSession, notify, sessionOf, getState, useAppState } from '../state/store';
+import { setSplitOnBlankLine, message } from '../state/actions';
 import { statementAt } from '../lib/sqlparse';
 import type { ExplainResult, SqlTab, StatementResult } from '../types';
 
 export default function SqlEditor({ tab }: { tab: SqlTab }) {
+  const { splitOnBlankLine } = useAppState();
   const [text, setText] = useState<string>(() => getTabScratch(tab.id, 'sql', ''));
   const [results, setResults] = useState<StatementResult[]>(() => getTabScratch(tab.id, 'results', [] as StatementResult[]));
   const [plan, setPlan] = useState<ExplainResult | null>(() => getTabScratch(tab.id, 'plan', null));
@@ -20,6 +21,30 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
   const viewRef = useRef<EditorView | null>(null);
   const runRef = useRef<(whole: boolean) => void>(() => {});
   const explainRef = useRef<() => void>(() => {});
+
+  // 편집기와 결과의 높이 비율 (탭마다 기억한다)
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [editorRatio, setEditorRatio] = useState<number>(() => getTabScratch(tab.id, 'editorRatio', 45));
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => { setTabScratch(tab.id, 'editorRatio', editorRatio); }, [tab.id, editorRatio]);
+
+  const startDrag = useCallback((e: ReactMouseEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    const box = rootRef.current?.getBoundingClientRect();
+    if (!box) return;
+    const move = (ev: MouseEvent) => {
+      const ratio = ((ev.clientY - box.top) / box.height) * 100;
+      setEditorRatio(Math.min(85, Math.max(15, ratio)));
+    };
+    const up = () => {
+      setDragging(false);
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }, []);
 
   useEffect(() => { setTabScratch(tab.id, 'sql', text); }, [tab.id, text]);
   useEffect(() => { setTabScratch(tab.id, 'results', results); }, [tab.id, results]);
@@ -35,8 +60,8 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
     if (whole || !view) return doc;
     const sel = view.state.selection.main;
     if (!sel.empty) return doc.slice(sel.from, sel.to);
-    return statementAt(doc, sel.head)?.text ?? '';
-  }, [text]);
+    return statementAt(doc, sel.head, { blankLine: splitOnBlankLine })?.text ?? '';
+  }, [text, splitOnBlankLine]);
 
   const run = useCallback(async (whole: boolean) => {
     const toRun = targetSql(whole);
@@ -44,7 +69,9 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
 
     setRunning(true);
     try {
-      const res = await window.api.sql.execute(tab.connectionId, toRun, { maxRows: 5000, stopOnError: true });
+      const res = await window.api.sql.execute(tab.connectionId, toRun, {
+        maxRows: 5000, stopOnError: true, splitOnBlankLine,
+      });
       setResults(res.results);
       setPlan(null);
       setActiveResult(0);
@@ -56,14 +83,14 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
     } finally {
       setRunning(false);
     }
-  }, [tab.connectionId, targetSql]);
+  }, [tab.connectionId, targetSql, splitOnBlankLine]);
 
   const explain = useCallback(async () => {
     const toRun = targetSql(false);
     if (!toRun.trim()) return;
     setRunning(true);
     try {
-      const res = await window.api.sql.explain(tab.connectionId, toRun, { analyze });
+      const res = await window.api.sql.explain(tab.connectionId, toRun, { analyze, splitOnBlankLine });
       setPlan(res);
       setResults([]);
       setSession(tab.connectionId, res.status);
@@ -72,7 +99,7 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
     } finally {
       setRunning(false);
     }
-  }, [tab.connectionId, targetSql, analyze]);
+  }, [tab.connectionId, targetSql, analyze, splitOnBlankLine]);
 
   runRef.current = (whole: boolean) => { void run(whole); };
   explainRef.current = () => { void explain(); };
@@ -98,7 +125,7 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
   const current = results[activeResult];
 
   return (
-    <div className="sql-editor">
+    <div className="sql-editor" ref={rootRef}>
       <div className="sql-toolbar">
         <button className="btn small primary" disabled={running} onClick={() => void run(false)} title="⌘/Ctrl + Enter">
           ▶ 실행
@@ -116,11 +143,22 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
         <button className="btn small" onClick={() => { setResults([]); setPlan(null); setActiveResult(0); }} disabled={!results.length && !plan}>
           결과 지우기
         </button>
+        <div className="toolbar-sep" />
+        <span className="toolbar-label">구분</span>
+        <select
+          className="select small"
+          value={splitOnBlankLine ? 'blank' : 'semicolon'}
+          onChange={(e) => void setSplitOnBlankLine(e.target.value === 'blank')}
+          title="여러 문장을 무엇으로 나눌지"
+        >
+          <option value="semicolon">세미콜론</option>
+          <option value="blank">세미콜론 + 빈 줄</option>
+        </select>
         <div className="spacer" />
         <span className="hint">{tab.database}{session?.hasSchemaLevel && tab.schema ? ` · ${tab.schema}` : ''}</span>
       </div>
 
-      <div className="sql-body">
+      <div className="sql-body" style={{ flexBasis: `${editorRatio}%` }}>
         <CodeMirror
           value={text}
           height="100%"
@@ -132,7 +170,13 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
         />
       </div>
 
-      <div className="sql-results">
+      <div
+        className={`sql-splitter ${dragging ? 'dragging' : ''}`}
+        title="끌어서 편집기 높이 조절"
+        onMouseDown={startDrag}
+      />
+
+      <div className="sql-results" style={{ flexBasis: `${100 - editorRatio}%` }}>
         {results.length > 1 && (
           <div className="result-tabs">
             {results.map((r, i) => (

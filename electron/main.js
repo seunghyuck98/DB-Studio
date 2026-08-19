@@ -18,6 +18,7 @@ const db = require('./db');
 const store = require('./store');
 const exporter = require('./export');
 const history = require('./history');
+const settings = require('./settings');
 
 let mainWindow = null;
 
@@ -182,6 +183,9 @@ handle('export:query', async (id, req) => {
   const result = await exporter.exportRows({ ...req, columns: data.columns, rows: data.rows });
   return { ...result, truncated: data.truncated };
 });
+
+handle('settings:get', () => settings.get());
+handle('settings:set', (patch) => settings.set(patch));
 
 handle('history:list', (query) => history.list(query));
 handle('history:clear', () => history.clear());

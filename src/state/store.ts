@@ -51,6 +51,8 @@ export interface AppState {
   toast: Toast | null;
   /** SQL 편집기 목록 패널 표시 여부 */
   sqlListOpen: boolean;
+  /** 빈 줄도 문장 구분자로 볼지 (설정 파일에 저장된다) */
+  splitOnBlankLine: boolean;
   dialog:
     | { kind: 'connection'; connection: ConnectionConfig | null }
     | { kind: 'password'; connection: ConnectionConfig }
@@ -80,6 +82,7 @@ const initialState: AppState = {
   },
   toast: null,
   sqlListOpen: false,
+  splitOnBlankLine: false,
   dialog: null,
 };
 
@@ -215,6 +218,22 @@ export function sqlTabs(s: AppState = state): SqlTab[] {
 
 export function closeTabs(ids: string[]): void {
   ids.forEach(closeTab);
+}
+
+/** 이 탭만 남기고 모두 닫는다. */
+export function closeOtherTabs(keepId: string): void {
+  closeTabs(state.tabs.filter((t) => t.id !== keepId).map((t) => t.id));
+}
+
+/** 이 탭보다 오른쪽에 있는 탭을 닫는다. */
+export function closeTabsToRight(fromId: string): void {
+  const idx = state.tabs.findIndex((t) => t.id === fromId);
+  if (idx < 0) return;
+  closeTabs(state.tabs.slice(idx + 1).map((t) => t.id));
+}
+
+export function closeAllTabs(): void {
+  closeTabs(state.tabs.map((t) => t.id));
 }
 
 export function closeTab(id: string): void {

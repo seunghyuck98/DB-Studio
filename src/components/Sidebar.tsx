@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import SearchResults from './SearchResults';
+import ContextMenu, { type MenuState } from './ContextMenu';
 import {
   useAppState, setState, setSearch, clearSearchResult, openTableTab, openSqlTab,
   activeConnectionId, needsServerSearch, sessionOf,
@@ -15,28 +16,11 @@ const SCOPE_LABELS: { key: keyof SearchScopes; label: string; hint: string }[] =
   { key: 'source', label: '스크립트', hint: '뷰·함수·프로시저·트리거 정의' },
 ];
 
-interface MenuState {
-  x: number;
-  y: number;
-  items: { label: string; action: () => void; danger?: boolean; disabled?: boolean }[];
-}
-
 export default function Sidebar() {
   const state = useAppState();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [scopeOpen, setScopeOpen] = useState(false);
   const scopeRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    window.addEventListener('click', close);
-    window.addEventListener('resize', close);
-    return () => {
-      window.removeEventListener('click', close);
-      window.removeEventListener('resize', close);
-    };
-  }, [menu]);
 
   useEffect(() => {
     if (!scopeOpen) return;
@@ -156,21 +140,7 @@ export default function Sidebar() {
         </div>
       )}
 
-      {menu && (
-        <ul className="context-menu" style={{ left: menu.x, top: menu.y }}>
-          {menu.items.map((it, i) => (
-            <li key={i}>
-              <button
-                className={it.danger ? 'danger' : ''}
-                disabled={it.disabled}
-                onClick={() => { setMenu(null); it.action(); }}
-              >
-                {it.label}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </aside>
   );
 }

@@ -55,6 +55,10 @@ contextBridge.exposeInMainWorld('api', {
     /** 페이지 제한 없이 다시 조회해서 저장한다. */
     query: (id, req) => call('export:query', id, req),
   },
+  settings: {
+    get: () => call('settings:get'),
+    set: (patch) => call('settings:set', patch),
+  },
   history: {
     list: (query) => call('history:list', query || {}),
     clear: () => call('history:clear'),
