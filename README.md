@@ -297,6 +297,10 @@ electron/
     mysql.js       MySQL / MariaDB 드라이버
     postgres.js    PostgreSQL 드라이버
     sqlparse.js    SQL 문장 분리 (문자열·주석·달러 인용 인식)
+mcp/
+  server.js        Claude Code 용 MCP 서버 (electron/db 를 그대로 재사용)
+  config.js        MCP 전용 접속 설정 읽기
+  init.js          설정 파일 예시 생성
 scripts/
   make-icon.js     build/icon.png 생성
   install-app.js   빌드한 앱을 ~/Applications 에 설치 (번들을 유지해 Dock 고정을 지킨다)
@@ -309,6 +313,71 @@ src/
 
 DB 접근은 전부 메인 프로세스에서 일어나고, 렌더러는 `contextIsolation` 아래에서 IPC 로만 통신한다.
 접속마다 전용 커넥션 하나를 유지하므로 트랜잭션이 SQL 편집기와 데이터 그리드에 걸쳐 이어진다.
+
+## Claude Code 연결 (MCP)
+
+DB Studio 의 드라이버와 메타데이터 조회 로직을 MCP 서버로 내어, Claude Code 가 데이터베이스를
+직접 살펴볼 수 있다. **Claude Code 구독을 그대로 쓰므로 추가 과금이 없다** (Anthropic API 키가 필요하지 않다).
+
+```bash
+npm run mcp:init                                     # ~/.dbstudio-mcp.json 예시 생성 (권한 600)
+# 접속 정보를 채운 뒤
+claude mcp add dbstudio -- node <저장소경로>/mcp/server.js
+```
+
+앱과 무관하게 독립 실행된다 — DB Studio 를 켜 두지 않아도 된다.
+앱의 접속 정보는 OS 키체인으로 암호화돼 있어 앱 밖에서 풀 수 없으므로, MCP 서버는 자기 설정 파일을 따로 읽는다.
+
+### 설정 파일
+
+```json
+{
+  "maxRows": 200,
+  "connections": [
+    {
+      "name": "prod-emr",
+      "kind": "postgres",
+      "host": "10.0.0.10",
+      "port": 5432,
+      "user": "readonly",
+      "passwordEnv": "EMR_PASSWORD",
+      "database": "emr",
+      "readOnly": true
+    }
+  ]
+}
+```
+
+- `passwordEnv` 로 환경변수 이름을 가리키면 비밀번호를 파일에 적지 않아도 된다. `password` 로 직접 적어도 된다.
+- `maxRows` 는 한 번에 돌려줄 행 수 상한이다 (기본 200, 최대 10000).
+- 설정 파일 위치는 `DBSTUDIO_MCP_CONFIG` 로 바꿀 수 있다.
+
+### 도구
+
+| 도구 | 하는 일 |
+| --- | --- |
+| `list_connections` | 등록된 접속과 조회 전용 여부 |
+| `list_schemas` | 데이터베이스·스키마 목록 |
+| `list_tables` | 테이블·뷰 목록 (주석, 대략적인 행 수) |
+| `describe_table` | 컬럼·키·외래키·참조·인덱스·DDL 을 한 번에 |
+| `query` | 조회 실행 (행 수 상한 적용) |
+| `search_objects` | 이름·컬럼명·주석·정의 스크립트 검색 |
+| `explain` | 실행 계획 (쿼리를 실행하지 않는다) |
+| `commit` | 쓰기 접속의 트랜잭션 확정·롤백 |
+
+### 안전장치
+
+에이전트가 실수로 데이터를 바꾸지 못하게 기본값을 좁게 잡았다.
+
+- **접속은 기본이 조회 전용이다.** `"readOnly": false` 를 명시해야 쓰기가 열린다.
+- 조회 전용 접속에서는 **SELECT 계열 한 문장만** 통과한다. `UPDATE`·`DROP`·여러 문장은 거부된다.
+- 결과 행 수에 상한이 있어 큰 테이블을 통째로 끌어오지 않는다.
+- 쓰기가 열린 접속도 **수동 커밋이 기본**이라 `commit` 을 부르기 전에는 확정되지 않는다.
+  `commit` 은 무엇이 확정되는지 문장 목록으로 함께 돌려준다.
+
+> 운영 DB 를 붙일 때는 **읽기 전용 DB 계정**을 만들어 쓰는 편이 안전하다.
+> 설정 파일의 `readOnly` 는 이 서버가 거는 제약이고, DB 권한 자체가 아니다.
+> 설정 파일에 비밀번호를 평문으로 두게 되므로(권한 600) `passwordEnv` 쪽을 권한다.
 
 ## 설정 파일 위치
 
@@ -351,3 +420,4 @@ electron-builder 가 이걸로 `icon.icns` 를 만들 뿐이다 (내용이 같�
 - 인덱스·제약조건 편집 (컬럼 편집만 있음), 테이블 생성·삭제
 - 큰 결과의 스트리밍 내보내기 (지금은 전부 메모리에 올린 뒤 저장한다)
 - macOS 코드 서명 · 공증, 자동 업데이트
+- 앱 안의 AI 어시스턴트 (자연어→SQL). Claude API 키가 필요해 별도 과금이 붙는다 — 지금은 MCP 쪽만 있다

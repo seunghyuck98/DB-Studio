@@ -20,7 +20,9 @@
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:win": "npm run build && electron-builder --win",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist:linux": "npm run build && electron-builder --linux",
+    "mcp": "node mcp/server.js",
+    "mcp:init": "node mcp/init.js"
   },
   "build": {
     "appId": "com.douzone.dbstudio",
@@ -35,7 +37,10 @@
       "dist/**/*",
       "build/icon.png",
       "package.json",
-      "!**/*.map"
+      "!**/*.map",
+      "!node_modules/@modelcontextprotocol/**",
+      "!node_modules/zod/**",
+      "!mcp/**"
     ],
     "asar": true,
     "asarUnpack": [
@@ -46,14 +51,33 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] },
-        { "target": "zip", "arch": ["arm64", "x64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.png",
       "darkModeSupport": true
     },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.png"
     },
     "nsis": {
@@ -62,12 +86,16 @@
       "shortcutName": "DB Studio"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Development",
       "icon": "build/icon.png"
     }
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "exceljs": "^4.4.0",
     "mysql2": "^3.11.5",
     "pg": "^8.13.1"

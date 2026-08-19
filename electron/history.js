@@ -2,7 +2,17 @@
 
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
+
+/**
+ * Electron 밖(MCP 서버·테스트)에서도 db 모듈을 그대로 쓸 수 있어야 하므로
+ * electron 을 조건부로 불러온다. 없으면 파일에 남기지 않고 메모리에만 둔다.
+ */
+let app = null;
+try {
+  ({ app } = require('electron'));
+} catch (_) {
+  /* Electron 이 아닌 실행 환경 */
+}
 
 const MAX_ENTRIES = 5000;
 const MAX_SQL_LENGTH = 20000;
@@ -12,14 +22,17 @@ let entries = null;
 let seq = 0;
 let flushTimer = null;
 
+/** Electron 이 없으면 저장할 곳이 없다 (메모리 전용). */
 function filePath() {
-  return path.join(app.getPath('userData'), 'query-history.json');
+  return app ? path.join(app.getPath('userData'), 'query-history.json') : null;
 }
 
 function load() {
   if (entries) return entries;
+  const file = filePath();
+  if (!file) { entries = []; return entries; }
   try {
-    const parsed = JSON.parse(fs.readFileSync(filePath(), 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
     entries = Array.isArray(parsed) ? parsed.slice(-MAX_ENTRIES) : [];
   } catch (_) {
     entries = [];
@@ -40,9 +53,11 @@ function scheduleFlush() {
 
 function flush() {
   if (!entries) return;
+  const file = filePath();
+  if (!file) return;
   try {
-    fs.mkdirSync(path.dirname(filePath()), { recursive: true });
-    fs.writeFileSync(filePath(), JSON.stringify(entries), 'utf8');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(entries), 'utf8');
   } catch (_) {
     /* 히스토리 저장 실패는 조회를 막지 않는다 */
   }
