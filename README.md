@@ -320,10 +320,20 @@ DB Studio 의 드라이버와 메타데이터 조회 로직을 MCP 서버로 내
 직접 살펴볼 수 있다. **Claude Code 구독을 그대로 쓰므로 추가 과금이 없다** (Anthropic API 키가 필요하지 않다).
 
 ```bash
-npm run mcp:init                                     # ~/.dbstudio-mcp.json 예시 생성 (권한 600)
-# 접속 정보를 채운 뒤
-claude mcp add dbstudio -- node <저장소경로>/mcp/server.js
+npm run mcp:init          # ~/.dbstudio-mcp.json 예시 생성 (권한 600)
+# 접속 정보를 채운 뒤 등록
+claude mcp add dbstudio -s user -- "$(which node)" <저장소경로>/mcp/server.js
 ```
+
+등록한 뒤 `claude` 를 새로 띄우면 붙는다 (MCP 는 세션 시작 시 로드된다). `/mcp` 로 상태를 볼 수 있다.
+
+> **node 경로를 절대 경로로 넣는다.** nvm 을 쓰면 기본 버전이 낮게 잡혀 있을 수 있고,
+> 이 서버는 Node 18 이상이 필요하다. `node` 라고만 적으면 실행 시점의 버전에 따라 실패한다.
+> (낮은 버전으로 뜨면 서버가 무엇이 문제인지 알려주고 종료한다.)
+
+> Claude Code 세션 **안에서** `claude mcp add` 를 실행하면, 실행 중인 클라이언트가
+> `~/.claude.json` 을 다시 쓰면서 등록이 지워질 수 있다. 별도 터미널에서 실행하고
+> `claude mcp list` 로 남았는지 확인한다.
 
 앱과 무관하게 독립 실행된다 — DB Studio 를 켜 두지 않아도 된다.
 앱의 접속 정보는 OS 키체인으로 암호화돼 있어 앱 밖에서 풀 수 없으므로, MCP 서버는 자기 설정 파일을 따로 읽는다.

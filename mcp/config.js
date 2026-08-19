@@ -88,8 +88,18 @@ function load() {
   };
 }
 
-/** `npm run mcp:init` 이 만드는 예시 설정 */
+/**
+ * `npm run mcp:init` 이 만드는 예시 설정.
+ * 이 상태로도 서버가 뜨도록 비밀번호는 빈 값으로 둔다 (접속은 실제로 쓸 때 열린다).
+ * JSON 에는 주석을 쓸 수 없어 _help 로 안내를 남긴다. 모르는 키는 무시된다.
+ */
 const TEMPLATE = {
+  _help: [
+    'kind: mysql | mariadb | postgres',
+    'password 에 직접 적거나, passwordEnv 로 환경변수 이름을 가리킬 수 있습니다.',
+    'readOnly 를 false 로 두면 쓰기가 열립니다. 기본은 조회 전용입니다.',
+    'maxRows 는 한 번에 돌려줄 행 수 상한입니다 (최대 10000).',
+  ],
   maxRows: 200,
   connections: [
     {
@@ -98,7 +108,7 @@ const TEMPLATE = {
       host: '127.0.0.1',
       port: 5432,
       user: 'postgres',
-      passwordEnv: 'PGPASSWORD',
+      password: '',
       database: 'postgres',
       readOnly: true,
     },

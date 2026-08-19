@@ -14,6 +14,18 @@
  *  - 쓰기가 열린 접속도 수동 커밋이 기본이라 commit 을 부르기 전에는 확정되지 않는다.
  */
 
+// MCP SDK 는 Node 18 이상이 필요하다. 낮은 버전에서 뜨면 원인을 알기 어려운
+// 모듈 오류가 나므로 여기서 먼저 걸러 준다.
+const NODE_MAJOR = Number(process.versions.node.split('.')[0]);
+if (NODE_MAJOR < 18) {
+  process.stderr.write(
+    `\nNode ${process.versions.node} 로 실행됐습니다. 이 서버는 Node 18 이상이 필요합니다.\n`
+    + 'MCP 클라이언트에 등록할 때 node 를 절대 경로로 지정하세요. 예:\n'
+    + '  claude mcp add dbstudio -- /path/to/node20/bin/node <저장소>/mcp/server.js\n\n',
+  );
+  process.exit(1);
+}
+
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
