@@ -793,3 +793,11 @@ body {
   border: 1px dashed var(--accent);
 }
 .split-hint.right { left: 50%; }
+
+/* ⌘/Ctrl 을 누른 채 올린 스키마.테이블 — 클릭하면 열린다 */
+.cm-table-link {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  color: var(--accent);
+}

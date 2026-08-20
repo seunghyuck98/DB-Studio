@@ -7,10 +7,12 @@ import ResultGrid from './ResultGrid';
 import PlanView from './PlanView';
 import {
   getTabScratch, setTabScratch, setSession, notify, sessionOf, connectionOf, getState, useAppState, activeTab,
+  openTableTab,
 } from '../state/store';
 import { setSplitOnBlankLine, message, connect } from '../state/actions';
 import { scheduleWorkspaceSave } from '../state/workspace';
 import { statementAt } from '../lib/sqlparse';
+import { tableLink, type LinkPart } from '../lib/tablelink';
 import type { ExplainResult, SqlTab, StatementResult } from '../types';
 
 export default function SqlEditor({ tab }: { tab: SqlTab }) {
@@ -25,6 +27,7 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
   const viewRef = useRef<EditorView | null>(null);
   const runRef = useRef<(whole: boolean) => void>(() => {});
   const explainRef = useRef<() => void>(() => {});
+  const linkRef = useRef<(parts: LinkPart[]) => void>(() => {});
 
   // 편집기와 결과의 높이 비율 (탭마다 기억한다)
   const rootRef = useRef<HTMLDivElement>(null);
@@ -114,8 +117,62 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
     }
   }, [tab.connectionId, targetSql, analyze, splitOnBlankLine]);
 
+  /**
+   * ⌘/Ctrl + 클릭한 `스키마.테이블` 을 연다.
+   * PostgreSQL 은 따옴표 없는 식별자를 소문자로 접으므로 여기서도 그렇게 맞추고,
+   * 실제로 있는 테이블인지 메타데이터로 확인한 뒤 연다 — 아무 단어나 눌러
+   * 깨진 탭이 열리는 것보다 안내가 낫다.
+   */
+  const openLinkedTable = useCallback(async (parts: LinkPart[]) => {
+    const s2 = getState();
+    const ses = sessionOf(tab.connectionId, s2);
+    if (!ses?.connected) {
+      notify('info', '접속이 열려 있지 않아 테이블을 열 수 없습니다.');
+      return;
+    }
+    const pg = !!ses.hasSchemaLevel;
+    const name = (p: LinkPart) => (pg && !p.quoted ? p.name.toLowerCase() : p.name);
+
+    let database: string;
+    let schema: string;
+    let table: string;
+    if (pg) {
+      // 스키마.테이블 (셋이면 앞은 데이터베이스 — 같은 접속 안에서만 연다)
+      const tail = parts.slice(-3);
+      if (tail.length === 3) [database, schema, table] = [name(tail[0]), name(tail[1]), name(tail[2])];
+      else if (tail.length === 2) [database, schema, table] = [tab.database || ses.currentDatabase || '', name(tail[0]), name(tail[1])];
+      else [database, schema, table] = [tab.database || ses.currentDatabase || '', tab.schema || ses.currentSchema || '', name(tail[0])];
+    } else {
+      // MySQL 은 데이터베이스가 곧 스키마다: 디비.테이블
+      const tail = parts.slice(-2);
+      if (tail.length === 2) { database = name(tail[0]); schema = database; table = name(tail[1]); }
+      else { database = tab.database || ses.currentDatabase || ''; schema = database; table = name(tail[0]); }
+    }
+    if (!schema || !table) return;
+
+    try {
+      const tables: { name: string; kind: string }[] = await window.api.meta.get(tab.connectionId, 'tables', { schema });
+      const found = tables.find((t) => t.name === table)
+        ?? tables.find((t) => t.name.toLowerCase() === table.toLowerCase());
+      if (!found) {
+        notify('info', `${schema}.${table} — 테이블을 찾을 수 없습니다.`);
+        return;
+      }
+      openTableTab({
+        connectionId: tab.connectionId,
+        database,
+        schema,
+        table: found.name,
+        objectKind: found.kind === 'view' ? 'view' : 'table',
+      });
+    } catch (e) {
+      notify('error', message(e));
+    }
+  }, [tab.connectionId, tab.database, tab.schema]);
+
   runRef.current = (whole: boolean) => { void run(whole); };
   explainRef.current = () => { void explain(); };
+  linkRef.current = (parts: LinkPart[]) => { void openLinkedTable(parts); };
 
   // 메뉴의 '실행 계획' 명령 처리
   useEffect(() => {
@@ -128,6 +185,7 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
   const extensions = useMemo<Extension[]>(() => [
     sql({ dialect, upperCaseKeywords: true }),
     EditorView.lineWrapping,
+    tableLink((parts) => linkRef.current(parts)),
     Prec.highest(keymap.of([
       { key: 'Mod-Enter', preventDefault: true, run: () => { runRef.current(false); return true; } },
       { key: 'Mod-Shift-Enter', preventDefault: true, run: () => { runRef.current(true); return true; } },
