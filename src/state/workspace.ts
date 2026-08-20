@@ -26,6 +26,7 @@ function snapshot(): { activeId: string | null; editors: SavedSqlEditor[] } {
   const s = getState();
   const editors: SavedSqlEditor[] = s.tabs.filter(isSql).map((t) => ({
     id: t.id,
+    pane: t.pane === 1 ? 1 : 0,
     title: t.title,
     connectionId: t.connectionId,
     database: t.database,

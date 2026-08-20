@@ -751,3 +751,45 @@ body {
   background: color-mix(in srgb, var(--amber) 16%, var(--panel));
   border-bottom: 1px solid var(--border);
 }
+
+/* ---- 화면 분할 ---- */
+.pane-row { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.pane-row.split .editor-pane + .editor-pane { border-left: 1px solid var(--border); }
+/* 분할 중 포커스된 화면을 살짝 표시 */
+.pane-row.split .editor-pane.focused .tab-bar { box-shadow: inset 0 2px 0 var(--accent); }
+.editor-host { position: relative; }
+
+/* 탭을 끌었을 때의 드롭 위치 미리보기 */
+.tab { position: relative; }
+.tab.drop-before::before {
+  content: '';
+  position: absolute;
+  left: -1px; top: 4px; bottom: 4px;
+  width: 2px;
+  background: var(--accent);
+}
+.tab-bar.drop-end { box-shadow: inset -3px 0 0 var(--accent); }
+.tab-bar-hint {
+  align-self: center;
+  margin-left: 8px;
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* 분할 드롭 영역 미리보기 */
+.split-hint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px dashed var(--accent);
+}
+.split-hint.right { left: 50%; }

@@ -45,7 +45,12 @@ export interface AppState {
   expanded: Record<string, boolean>;
   nodes: Record<string, TreeNodeState>;
   tabs: Tab[];
+  /** 왼쪽(0) 화면의 활성 탭 */
   activeTabId: string | null;
+  /** 오른쪽(1) 화면의 활성 탭. 분할이 없으면 null */
+  splitActiveTabId: string | null;
+  /** 마지막으로 만진 화면. 새 탭·툴바·상태 표시줄이 이쪽을 따라간다 */
+  focusedPane: 0 | 1;
   treeFilter: string;
   search: SearchState;
   toast: Toast | null;
@@ -67,6 +72,8 @@ const initialState: AppState = {
   nodes: {},
   tabs: [],
   activeTabId: null,
+  splitActiveTabId: null,
+  focusedPane: 0,
   treeFilter: '',
   search: {
     // 기본은 넓게 찾는다. 좁히고 싶을 때만 범위를 끈다.
@@ -106,8 +113,29 @@ export function useAppState(): AppState {
 
 // ---- 파생 헬퍼 --------------------------------------------------------------
 
+/** 탭이 속한 화면 (0=왼쪽, 1=오른쪽) */
+export function paneOf(tab: Tab): 0 | 1 {
+  return tab.pane === 1 ? 1 : 0;
+}
+
+/** 한 화면에 속한 탭들 (렌더링 순서 = 전체 배열 순서) */
+export function paneTabs(s: AppState, pane: 0 | 1): Tab[] {
+  return s.tabs.filter((t) => paneOf(t) === pane);
+}
+
+/** 화면 분할 중인지 */
+export function isSplit(s: AppState = state): boolean {
+  return s.tabs.some((t) => paneOf(t) === 1);
+}
+
+export function paneActiveId(s: AppState, pane: 0 | 1): string | null {
+  return pane === 1 ? s.splitActiveTabId : s.activeTabId;
+}
+
+/** 포커스된 화면의 활성 탭. 그 화면이 비어 있으면 반대쪽을 본다. */
 export function activeTab(s: AppState = state): Tab | null {
-  return s.tabs.find((t) => t.id === s.activeTabId) ?? null;
+  const find = (id: string | null) => s.tabs.find((t) => t.id === id) ?? null;
+  return find(paneActiveId(s, s.focusedPane)) ?? find(paneActiveId(s, s.focusedPane === 1 ? 0 : 1));
 }
 
 export function activeConnectionId(s: AppState = state): string | null {
@@ -178,14 +206,30 @@ export function tableTabId(connectionId: string, database: string, schema: strin
   return `table:${connectionId}:${database}:${schema}:${table}`;
 }
 
+/** 탭을 활성으로 만드는 상태 조각. 탭이 속한 화면의 활성만 바꾸고 그쪽에 포커스를 준다. */
+function activatePatch(tab: Tab): Partial<AppState> {
+  return paneOf(tab) === 1
+    ? { splitActiveTabId: tab.id, focusedPane: 1 }
+    : { activeTabId: tab.id, focusedPane: 0 };
+}
+
+/** 새 탭을 포커스된 화면에 넣고 활성으로 만든다. */
+export function pushTab(tab: Tab): void {
+  setState((s) => {
+    const withPane = { ...tab, pane: s.focusedPane } as Tab;
+    return { tabs: [...s.tabs, withPane], ...activatePatch(withPane) };
+  });
+  workspaceChanged();
+}
+
 export function openTableTab(tab: Omit<TableTab, 'id' | 'kind' | 'activeSection'> & { activeSection?: TableTab['activeSection'] }): void {
   const id = tableTabId(tab.connectionId, tab.database, tab.schema, tab.table);
-  setState((s) => {
-    const found = s.tabs.find((t) => t.id === id);
-    if (found) return { activeTabId: id };
-    const next: TableTab = { id, kind: 'table', activeSection: tab.activeSection ?? 'data', ...tab };
-    return { tabs: [...s.tabs, next], activeTabId: id };
-  });
+  const found = state.tabs.find((t) => t.id === id);
+  if (found) {
+    setState(() => activatePatch(found));
+    return;
+  }
+  pushTab({ id, kind: 'table', activeSection: tab.activeSection ?? 'data', ...tab });
 }
 
 let sqlSeq = 0;
@@ -200,8 +244,7 @@ export function openSqlTab(connectionId: string, database: string, schema: strin
   const id = `sql:${connectionId}:${sqlSeq}`;
   const tab: SqlTab = { id, kind: 'sql', connectionId, database, schema, title: `SQL ${sqlSeq}` };
   if (initialSql) setTabScratch(id, 'sql', initialSql);
-  setState((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
-  workspaceChanged();
+  pushTab(tab);
 }
 
 /**
@@ -219,6 +262,7 @@ export function restoreSqlTabs(editors: SavedSqlEditor[], activeId: string | nul
       database: e.database,
       schema: e.schema,
       title: e.title,
+      pane: e.pane === 1 ? 1 : 0,
     });
     setTabScratch(e.id, 'sql', e.sql ?? '');
     if (typeof e.editorRatio === 'number') setTabScratch(e.id, 'editorRatio', e.editorRatio);
@@ -230,27 +274,38 @@ export function restoreSqlTabs(editors: SavedSqlEditor[], activeId: string | nul
   setState((s) => {
     const fresh = restored.filter((t) => !s.tabs.some((x) => x.id === t.id));
     const tabs = [...s.tabs, ...fresh];
-    const wanted = activeId && tabs.some((t) => t.id === activeId) ? activeId : null;
-    return { tabs, activeTabId: s.activeTabId ?? wanted ?? fresh[0]?.id ?? null };
+    const leftFresh = fresh.filter((t) => paneOf(t) === 0);
+    const rightFresh = fresh.filter((t) => paneOf(t) === 1);
+    const wanted = activeId ? tabs.find((t) => t.id === activeId) ?? null : null;
+    return {
+      tabs,
+      activeTabId: s.activeTabId
+        ?? (wanted && paneOf(wanted) === 0 ? wanted.id : null)
+        ?? leftFresh[0]?.id ?? null,
+      splitActiveTabId: s.splitActiveTabId
+        ?? (wanted && paneOf(wanted) === 1 ? wanted.id : null)
+        ?? rightFresh[0]?.id ?? null,
+    };
   });
 }
 
 /** 접속별 변경 내역 탭을 열거나 이미 열려 있으면 그 탭으로 이동한다. */
 export function openTxTab(connectionId: string): void {
   const id = `tx:${connectionId}`;
-  setState((s) => {
-    if (s.tabs.some((t) => t.id === id)) return { activeTabId: id };
-    const session = s.sessions[connectionId];
-    const conn = s.connections.find((c) => c.id === connectionId);
-    const tab: TxTab = {
-      id,
-      kind: 'tx',
-      connectionId,
-      database: session?.currentDatabase ?? '',
-      schema: session?.currentSchema ?? '',
-      title: `변경 내역${conn ? ` · ${conn.name}` : ''}`,
-    };
-    return { tabs: [...s.tabs, tab], activeTabId: id };
+  const found = state.tabs.find((t) => t.id === id);
+  if (found) {
+    setState(() => activatePatch(found));
+    return;
+  }
+  const session = state.sessions[connectionId];
+  const conn = state.connections.find((c) => c.id === connectionId);
+  pushTab({
+    id,
+    kind: 'tx',
+    connectionId,
+    database: session?.currentDatabase ?? '',
+    schema: session?.currentSchema ?? '',
+    title: `변경 내역${conn ? ` · ${conn.name}` : ''}`,
   });
 }
 
@@ -268,11 +323,13 @@ export function closeOtherTabs(keepId: string): void {
   closeTabs(state.tabs.filter((t) => t.id !== keepId).map((t) => t.id));
 }
 
-/** 이 탭보다 오른쪽에 있는 탭을 닫는다. */
+/** 같은 화면에서 이 탭보다 오른쪽에 있는 탭을 닫는다. */
 export function closeTabsToRight(fromId: string): void {
-  const idx = state.tabs.findIndex((t) => t.id === fromId);
-  if (idx < 0) return;
-  closeTabs(state.tabs.slice(idx + 1).map((t) => t.id));
+  const from = state.tabs.find((t) => t.id === fromId);
+  if (!from) return;
+  const inPane = paneTabs(state, paneOf(from));
+  const idx = inPane.findIndex((t) => t.id === fromId);
+  closeTabs(inPane.slice(idx + 1).map((t) => t.id));
 }
 
 export function closeAllTabs(): void {
@@ -281,15 +338,26 @@ export function closeAllTabs(): void {
 
 export function closeTab(id: string): void {
   setState((s) => {
-    const idx = s.tabs.findIndex((t) => t.id === id);
-    if (idx < 0) return {};
+    const closing = s.tabs.find((t) => t.id === id);
+    if (!closing) return {};
+    const pane = paneOf(closing);
+    const before = paneTabs(s, pane);
+    const idxInPane = before.findIndex((t) => t.id === id);
     const tabs = s.tabs.filter((t) => t.id !== id);
-    let activeTabId = s.activeTabId;
-    if (s.activeTabId === id) {
-      const neighbour = tabs[idx] ?? tabs[idx - 1] ?? null;
-      activeTabId = neighbour ? neighbour.id : null;
+
+    const patch: Partial<AppState> = { tabs };
+    if (paneActiveId(s, pane) === id) {
+      const rest = before.filter((t) => t.id !== id);
+      const neighbour = rest[idxInPane] ?? rest[idxInPane - 1] ?? null;
+      if (pane === 1) patch.splitActiveTabId = neighbour?.id ?? null;
+      else patch.activeTabId = neighbour?.id ?? null;
     }
-    return { tabs, activeTabId };
+    // 오른쪽 화면이 비면 분할을 접는다.
+    if (!tabs.some((t) => paneOf(t) === 1)) {
+      patch.splitActiveTabId = null;
+      patch.focusedPane = 0;
+    }
+    return patch;
   });
   disposeTabState(id);
   workspaceChanged();
@@ -308,7 +376,50 @@ export function closeTabsOfConnection(connectionId: string): void {
 }
 
 export function setActiveTab(id: string): void {
-  setState({ activeTabId: id });
+  setState((s) => {
+    const tab = s.tabs.find((t) => t.id === id);
+    if (!tab) return {};
+    return activatePatch(tab);
+  });
+  workspaceChanged();
+}
+
+export function setFocusedPane(pane: 0 | 1): void {
+  setState((s) => (s.focusedPane === pane ? {} : { focusedPane: pane }));
+}
+
+/**
+ * 탭을 다른 위치·화면으로 옮긴다 (드래그로 순서 바꾸기 / 화면 분할).
+ * beforeId 앞에 끼워 넣고, 없으면 그 화면의 맨 뒤로 보낸다.
+ * 옮긴 탭은 도착한 화면에서 활성이 된다.
+ */
+export function moveTab(dragId: string, target: { pane: 0 | 1; beforeId?: string | null }): void {
+  setState((s) => {
+    const dragged = s.tabs.find((t) => t.id === dragId);
+    if (!dragged) return {};
+    if (target.beforeId === dragId) return {};
+    const fromPane = paneOf(dragged);
+    const moved = { ...dragged, pane: target.pane } as Tab;
+
+    const tabs = s.tabs.filter((t) => t.id !== dragId);
+    const at = target.beforeId ? tabs.findIndex((t) => t.id === target.beforeId) : -1;
+    if (at >= 0) tabs.splice(at, 0, moved);
+    else tabs.push(moved);
+
+    const patch: Partial<AppState> = { tabs, ...activatePatch(moved) };
+    // 원래 화면에서 활성이었다면 그 화면의 활성을 남은 탭으로 넘긴다.
+    if (fromPane !== target.pane && paneActiveId(s, fromPane) === dragId) {
+      const rest = tabs.filter((t) => paneOf(t) === fromPane);
+      if (fromPane === 1) patch.splitActiveTabId = rest[0]?.id ?? null;
+      else patch.activeTabId = rest[0]?.id ?? null;
+    }
+    // 오른쪽 화면이 비면 분할을 접는다.
+    if (!tabs.some((t) => paneOf(t) === 1)) {
+      patch.splitActiveTabId = null;
+      if (patch.focusedPane === 1) patch.focusedPane = 0;
+    }
+    return patch;
+  });
   workspaceChanged();
 }
 

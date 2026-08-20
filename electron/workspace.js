@@ -57,6 +57,7 @@ function sanitize(snapshot) {
     const ratio = Number(raw.editorRatio);
     editors.push({
       id,
+      pane: raw.pane === 1 ? 1 : 0,
       title: str(raw.title, 200) || 'SQL',
       connectionId: str(raw.connectionId, 200),
       database: str(raw.database, 200),

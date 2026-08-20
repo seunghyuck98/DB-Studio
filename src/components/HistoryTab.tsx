@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import ExportButton from './ExportButton';
-import { getState, notify, openSqlTab, sessionOf, setState } from '../state/store';
+import { getState, notify, openSqlTab, sessionOf, setActiveTab, pushTab } from '../state/store';
 import { message } from '../state/actions';
 import type { HistoryEntry, HistoryTab as HistoryTabType } from '../types';
 
@@ -165,7 +165,7 @@ export function openHistoryTab(): void {
   const state = getState();
   const existing = state.tabs.find((t) => t.kind === 'history');
   if (existing) {
-    setState({ activeTabId: existing.id });
+    setActiveTab(existing.id);
     return;
   }
   const active = state.tabs.find((t) => t.id === state.activeTabId);
@@ -177,7 +177,7 @@ export function openHistoryTab(): void {
     schema: active && 'schema' in active ? active.schema : '',
     title: '쿼리 히스토리',
   };
-  setState({ tabs: [...state.tabs, tab], activeTabId: tab.id });
+  pushTab(tab);
 }
 
 function formatTime(iso: string): string {

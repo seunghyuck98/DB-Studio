@@ -243,6 +243,8 @@ export type TabKind = 'table' | 'sql' | 'history' | 'tx';
 
 export interface TableTab {
   id: string;
+  /** 화면 분할에서 어느 쪽에 있는지 (없으면 왼쪽 0) */
+  pane?: 0 | 1;
   kind: 'table';
   connectionId: string;
   database: string;
@@ -254,6 +256,8 @@ export interface TableTab {
 
 export interface SqlTab {
   id: string;
+  /** 화면 분할에서 어느 쪽에 있는지 (없으면 왼쪽 0) */
+  pane?: 0 | 1;
   kind: 'sql';
   connectionId: string;
   database: string;
@@ -263,6 +267,8 @@ export interface SqlTab {
 
 export interface HistoryTab {
   id: string;
+  /** 화면 분할에서 어느 쪽에 있는지 (없으면 왼쪽 0) */
+  pane?: 0 | 1;
   kind: 'history';
   connectionId: string;
   database: string;
@@ -273,6 +279,8 @@ export interface HistoryTab {
 /** 진행 중인 트랜잭션의 변경 내역 탭 (접속별로 하나) */
 export interface TxTab {
   id: string;
+  /** 화면 분할에서 어느 쪽에 있는지 (없으면 왼쪽 0) */
+  pane?: 0 | 1;
   kind: 'tx';
   connectionId: string;
   database: string;
@@ -285,6 +293,8 @@ export type Tab = TableTab | SqlTab | HistoryTab | TxTab;
 /** 다음 실행까지 남기는 SQL 편집기 하나. 결과는 저장하지 않는다. */
 export interface SavedSqlEditor {
   id: string;
+  /** 화면 분할 위치 (0=왼쪽, 1=오른쪽) */
+  pane?: 0 | 1;
   title: string;
   connectionId: string;
   database: string;

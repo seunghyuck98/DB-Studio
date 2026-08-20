@@ -1,12 +1,12 @@
-import { useAppState, activeTab, connectionOf, sessionOf } from '../state/store';
+import { useAppState, connectionOf, sessionOf } from '../state/store';
+import type { Tab } from '../types';
 
 /**
  * 현재 열려 있는 객체의 위치를 "접속 > DB > 스키마 > 테이블" 형태로 보여준다.
  * MySQL 처럼 스키마 계층이 없는 DB 에서는 스키마 구간을 생략한다.
  */
-export default function Breadcrumb() {
+export default function Breadcrumb({ tab }: { tab: Tab | null }) {
   const state = useAppState();
-  const tab = activeTab(state);
   if (!tab) return null;
 
   // 히스토리·변경 내역 탭은 특정 객체에 묶이지 않으므로 제목만 보여준다.

@@ -10,7 +10,7 @@ function strippedHead(sql: string): string {
 }
 
 export interface SplitOptions {
-  /** 켜면 빈 줄도 문장 구분자로 본다 */
+  /** 켜면 세미콜론 대신 빈 줄로만 나눈다 */
   blankLine?: boolean;
 }
 
@@ -71,7 +71,8 @@ export function splitStatements(script: string, opts: SplitOptions = {}): Statem
         continue;
       }
     }
-    if (c === ';') {
+    // 빈 줄 모드에서는 세미콜론으로 나누지 않는다 (electron/db/sqlparse.js 와 같은 규칙).
+    if (c === ';' && !blankLine) {
       push(i);
       i++;
       stmtStart = i;

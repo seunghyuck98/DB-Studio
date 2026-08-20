@@ -6,7 +6,7 @@ import { Prec, type Extension } from '@codemirror/state';
 import ResultGrid from './ResultGrid';
 import PlanView from './PlanView';
 import {
-  getTabScratch, setTabScratch, setSession, notify, sessionOf, connectionOf, getState, useAppState,
+  getTabScratch, setTabScratch, setSession, notify, sessionOf, connectionOf, getState, useAppState, activeTab,
 } from '../state/store';
 import { setSplitOnBlankLine, message, connect } from '../state/actions';
 import { scheduleWorkspaceSave } from '../state/workspace';
@@ -119,7 +119,7 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
 
   // 메뉴의 '실행 계획' 명령 처리
   useEffect(() => {
-    const handler = () => { if (getState().activeTabId === tab.id) explainRef.current(); };
+    const handler = () => { if (activeTab(getState())?.id === tab.id) explainRef.current(); };
     window.addEventListener('dbstudio:explain', handler);
     return () => window.removeEventListener('dbstudio:explain', handler);
   }, [tab.id]);
@@ -162,10 +162,10 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
           className="select small"
           value={splitOnBlankLine ? 'blank' : 'semicolon'}
           onChange={(e) => void setSplitOnBlankLine(e.target.value === 'blank')}
-          title="여러 문장을 무엇으로 나눌지"
+          title="여러 문장을 무엇으로 나눌지. 빈 줄: 세미콜론 대신 빈 줄로만 나눈다"
         >
           <option value="semicolon">세미콜론</option>
-          <option value="blank">세미콜론 + 빈 줄</option>
+          <option value="blank">빈 줄</option>
         </select>
         <div className="spacer" />
         <span className="hint">{tab.database}{session?.hasSchemaLevel && tab.schema ? ` · ${tab.schema}` : ''}</span>

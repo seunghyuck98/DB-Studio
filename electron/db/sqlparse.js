@@ -13,7 +13,8 @@ function strippedHead(sql) {
  * 인식하므로 그 안에 있는 세미콜론이나 빈 줄은 구분자로 취급하지 않는다.
  *
  * @param {string} script
- * @param {{ blankLine?: boolean }} [opts] blankLine 을 켜면 빈 줄도 문장 구분자로 본다.
+ * @param {{ blankLine?: boolean }} [opts] blankLine 을 켜면 세미콜론 대신 빈 줄로만 나눈다.
+ *   (문장 끝의 세미콜론은 문장의 일부로 남는다 — 한 문장을 그대로 보내는 데는 문제가 없다)
  * @returns {{ text: string, start: number, end: number }[]}
  */
 function splitStatements(script, opts = {}) {
@@ -73,8 +74,10 @@ function splitStatements(script, opts = {}) {
         continue;
       }
     }
-    // 문장 구분자
-    if (c === ';') {
+    // 문장 구분자 — 빈 줄 모드에서는 세미콜론으로 나누지 않는다.
+    // 여러 줄짜리 문장을 세미콜론 없이 쓰고 빈 줄로만 구분하고 싶을 때를 위한 모드라서,
+    // 두 구분자를 섞으면 "빈 줄 기준" 이라는 약속이 깨진다.
+    if (c === ';' && !blankLine) {
       push(i);
       i++;
       stmtStart = i;
