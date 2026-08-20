@@ -15,13 +15,19 @@ import TxConfirmDialog from './components/TxConfirmDialog';
 import Toaster from './components/Toaster';
 import { useAppState, activeTab, activeConnectionId, setState, openSqlTab } from './state/store';
 import { loadConnections, loadSettings, commit, rollback, setAutoCommit } from './state/actions';
+import { restoreWorkspace } from './state/workspace';
 
 export default function App() {
   const state = useAppState();
   const tab = activeTab(state);
   const connId = activeConnectionId(state);
 
-  useEffect(() => { void loadConnections(); void loadSettings(); }, []);
+  useEffect(() => {
+    void loadConnections();
+    void loadSettings();
+    // 지난 실행에서 열려 있던 SQL 편집기를 그대로 되살린다.
+    void restoreWorkspace();
+  }, []);
 
   // 애플리케이션 메뉴에서 오는 명령 처리 (preload 가 없으면 조용히 넘어간다)
   useEffect(() => {

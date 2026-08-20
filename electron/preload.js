@@ -60,6 +60,15 @@ contextBridge.exposeInMainWorld('api', {
     get: () => call('settings:get'),
     set: (patch) => call('settings:set', patch),
   },
+  workspace: {
+    /** 저장해 둔 SQL 편집기를 읽는다. */
+    load: () => call('workspace:load'),
+    save: (snapshot) => call('workspace:save', snapshot),
+    /** 창이 닫히는 중에 쓰는 마지막 저장. 응답을 기다릴 수 없으므로 동기로 보낸다. */
+    flush: (snapshot) => {
+      try { ipcRenderer.sendSync('workspace:flush', snapshot); } catch (_) { /* 종료 중 */ }
+    },
+  },
   history: {
     list: (query) => call('history:list', query || {}),
     clear: () => call('history:clear'),

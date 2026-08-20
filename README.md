@@ -95,6 +95,7 @@ electron-builder 는 재빌드마다 그 번들을 통째로 지웠다 새로 �
 | 결과 CSV · Excel 내보내기 | 데이터 그리드와 SQL 결과에서 CSV / TSV / Excel(.xlsx) 저장. "현재 화면 결과" 또는 "전체 결과(다시 조회)" 선택 |
 | DDL 편집 | Properties › 컬럼 에서 컬럼 추가·수정·삭제 → ALTER 문 미리보기 후 실행. DDL 탭도 직접 편집·실행 가능 |
 | 실행 계획 | SQL 편집기의 `실행 계획` 버튼. 비용 막대가 있는 트리 / 원본 / JSON 3가지 보기. ANALYZE 체크 시 실측값 |
+| SQL 편집기 저장 | 열려 있던 편집기와 본문을 앱 종료 후에도 그대로 되살린다 |
 | 쿼리 히스토리 | 실행한 모든 문장을 기록. 검색·오류만·현재 접속만 필터, 더블클릭으로 편집기에서 열기, CSV 내보내기 |
 
 ### 객체 검색
@@ -215,7 +216,20 @@ Properties › 컬럼 에서 `컬럼 편집` 을 누르면 이름 · 타입 · N
 - × — 삭제. 작성한 내용이 있으면 한 번 더 확인한다
 - `모두 닫기` — 전부 삭제 (내용이 있는 편집기 개수를 알려 준다)
 
-편집기 내용은 앱을 켜 둔 동안만 유지된다. 재시작해도 남기려면 별도 저장 기능이 필요하다(아래 "아직 없는 것").
+### SQL 편집기 저장
+
+열려 있는 편집기는 `userData/sql-editors.json` 에 남아, 앱을 껐다 켜도 그대로 이어서 쓸 수 있다.
+본문·제목·마지막에 보던 탭·편집기 높이까지 되살린다.
+
+- 타이핑을 멈추면 잠깐 뒤에 저장한다. 창을 닫는 순간에도 마지막 한 번을 더 저장한다.
+- **접속을 끊어도 편집기는 닫히지 않는다.** 쓴 글을 접속 상태와 함께 버릴 것이 아니라서다.
+  접속이 없는 동안에는 편집기 위에 안내가 뜨고 실행 버튼만 잠긴다. 다시 접속하면 그대로 실행된다.
+- 앱을 켜면 접속은 아직 열려 있지 않으므로, 편집기들이 그 안내와 함께 뜬다.
+  접속을 지운 뒤에 남은 편집기도 내용을 잃지 않는다.
+- 저장하지 않는 것: 결과 그리드와 실행 계획. 다시 실행하면 되고, 파일만 커진다.
+- 쓰다 죽어도 반쪽 파일이 남지 않게 임시 파일에 쓴 뒤 바꿔 넣고, 직전 내용을 `sql-editors.bak.json`
+  으로 한 세대 남긴다. 본 파일이 깨지면 백업에서 되살린다.
+- 편집기 200개, 편집기당 2MB 까지 남긴다.
 
 ### 트랜잭션 변경 내역
 
@@ -304,6 +318,7 @@ electron/
   store.js         접속 정보 저장 (userData/connections.json, 비밀번호는 safeStorage 암호화)
   history.js       쿼리 히스토리 기록·조회 (userData/query-history.json)
   settings.js      화면 설정 저장 (userData/settings.json)
+  workspace.js     SQL 편집기 저장·복원 (userData/sql-editors.json, .bak 한 세대)
   export.js        CSV / TSV / Excel 저장
   db/
     index.js       세션·트랜잭션 관리, 데이터 조회/변경, 스크립트 실행, 실행 계획, DDL, 객체 검색
@@ -433,10 +448,10 @@ claude mcp add dbstudio -s user -- "$(which node)" <저장소경로>/mcp/server.
 | Linux | `~/.config/DB Studio/` |
 
 이 폴더에는 접속 정보(`connections.json`), 쿼리 히스토리(`query-history.json`),
-화면 설정(`settings.json` — 쿼리 구분 방식 등)이 들어간다.
+화면 설정(`settings.json` — 쿼리 구분 방식 등), 열려 있던 SQL 편집기(`sql-editors.json`)가 들어간다.
 
-예전 소스 실행은 `dbstudio` 폴더를 썼다. 처음 실행할 때 `connections.json` 과 `query-history.json` 을
-새 폴더로 한 번 복사해 온다 (원본은 그대로 남는다).
+예전 소스 실행은 `dbstudio` 폴더를 썼다. 처음 실행할 때 `connections.json`, `query-history.json`,
+`sql-editors.json` 을 새 폴더로 한 번 복사해 온다 (원본은 그대로 남는다).
 
 비밀번호는 OS 키체인으로 암호화되어 있어 파일만 복사해도 다른 사용자 계정에서는 풀리지 않는다.
 
@@ -458,7 +473,6 @@ electron-builder 가 이걸로 `icon.icns` 를 만들 뿐이다 (내용이 같�
 
 - Oracle / SQL Server 드라이버 (`electron/db/` 에 드라이버를 추가하고 `DRIVERS` 에 등록하면 된다)
 - CSV/Excel 가져오기 (내보내기만 있음)
-- SQL 편집기 내용의 영구 저장 (앱을 재시작하면 사라진다)
 - 인덱스·제약조건 편집 (컬럼 편집만 있음), 테이블 생성·삭제
 - 큰 결과의 스트리밍 내보내기 (지금은 전부 메모리에 올린 뒤 저장한다)
 - macOS 코드 서명 · 공증, 자동 업데이트

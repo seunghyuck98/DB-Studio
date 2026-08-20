@@ -5,13 +5,17 @@ import { EditorView, keymap } from '@codemirror/view';
 import { Prec, type Extension } from '@codemirror/state';
 import ResultGrid from './ResultGrid';
 import PlanView from './PlanView';
-import { getTabScratch, setTabScratch, setSession, notify, sessionOf, getState, useAppState } from '../state/store';
-import { setSplitOnBlankLine, message } from '../state/actions';
+import {
+  getTabScratch, setTabScratch, setSession, notify, sessionOf, connectionOf, getState, useAppState,
+} from '../state/store';
+import { setSplitOnBlankLine, message, connect } from '../state/actions';
+import { scheduleWorkspaceSave } from '../state/workspace';
 import { statementAt } from '../lib/sqlparse';
 import type { ExplainResult, SqlTab, StatementResult } from '../types';
 
 export default function SqlEditor({ tab }: { tab: SqlTab }) {
-  const { splitOnBlankLine } = useAppState();
+  const state = useAppState();
+  const { splitOnBlankLine } = state;
   const [text, setText] = useState<string>(() => getTabScratch(tab.id, 'sql', ''));
   const [results, setResults] = useState<StatementResult[]>(() => getTabScratch(tab.id, 'results', [] as StatementResult[]));
   const [plan, setPlan] = useState<ExplainResult | null>(() => getTabScratch(tab.id, 'plan', null));
@@ -26,7 +30,10 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [editorRatio, setEditorRatio] = useState<number>(() => getTabScratch(tab.id, 'editorRatio', 45));
   const [dragging, setDragging] = useState(false);
-  useEffect(() => { setTabScratch(tab.id, 'editorRatio', editorRatio); }, [tab.id, editorRatio]);
+  useEffect(() => {
+    setTabScratch(tab.id, 'editorRatio', editorRatio);
+    scheduleWorkspaceSave();
+  }, [tab.id, editorRatio]);
 
   const startDrag = useCallback((e: ReactMouseEvent) => {
     e.preventDefault();
@@ -46,11 +53,17 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
     window.addEventListener('mouseup', up);
   }, []);
 
-  useEffect(() => { setTabScratch(tab.id, 'sql', text); }, [tab.id, text]);
+  // 본문은 파일에도 남긴다 (앱을 다시 켜면 그대로 이어서 쓸 수 있게).
+  useEffect(() => {
+    setTabScratch(tab.id, 'sql', text);
+    scheduleWorkspaceSave();
+  }, [tab.id, text]);
   useEffect(() => { setTabScratch(tab.id, 'results', results); }, [tab.id, results]);
   useEffect(() => { setTabScratch(tab.id, 'plan', plan); }, [tab.id, plan]);
 
-  const session = sessionOf(tab.connectionId, getState());
+  const session = sessionOf(tab.connectionId, state);
+  const conn = connectionOf(tab.connectionId, state);
+  const offline = !session?.connected;
   const dialect = session?.kind === 'postgres' ? PostgreSQL : MySQL;
 
   /** 실행 대상 SQL: 선택 영역 > 커서 위치 문장 > 전체 스크립트 */
@@ -127,13 +140,13 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
   return (
     <div className="sql-editor" ref={rootRef}>
       <div className="sql-toolbar">
-        <button className="btn small primary" disabled={running} onClick={() => void run(false)} title="⌘/Ctrl + Enter">
+        <button className="btn small primary" disabled={running || offline} onClick={() => void run(false)} title="⌘/Ctrl + Enter">
           ▶ 실행
         </button>
-        <button className="btn small" disabled={running} onClick={() => void run(true)} title="⌘/Ctrl + ⇧ + Enter">
+        <button className="btn small" disabled={running || offline} onClick={() => void run(true)} title="⌘/Ctrl + ⇧ + Enter">
           ▶▶ 스크립트 실행
         </button>
-        <button className="btn small" disabled={running} onClick={() => void explain()} title="⌘/Ctrl + ⇧ + E">
+        <button className="btn small" disabled={running || offline} onClick={() => void explain()} title="⌘/Ctrl + ⇧ + E">
           실행 계획
         </button>
         <label className="check small" title="켜면 쿼리를 실제로 실행해 실측값을 보여줍니다">
@@ -157,6 +170,19 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
         <div className="spacer" />
         <span className="hint">{tab.database}{session?.hasSchemaLevel && tab.schema ? ` · ${tab.schema}` : ''}</span>
       </div>
+
+      {offline && (
+        <div className="sql-offline">
+          {conn ? (
+            <>
+              <b>{conn.name}</b> 에 접속되어 있지 않습니다. 작성한 내용은 그대로 남아 있습니다.
+              <button className="btn small" onClick={() => void connect(conn)}>접속</button>
+            </>
+          ) : (
+            <>이 편집기가 쓰던 접속을 찾을 수 없습니다. 작성한 내용은 그대로 남아 있습니다.</>
+          )}
+        </div>
+      )}
 
       <div className="sql-body" style={{ flexBasis: `${editorRatio}%` }}>
         <CodeMirror

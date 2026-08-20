@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type {
   ConnectionConfig, SessionStatus, Tab, TableTab, SqlTab, HistoryTab, TxTab,
-  SearchScopes, SearchResult,
+  SearchScopes, SearchResult, SavedSqlEditor,
 } from '../types';
 
 export type TreeItemType = 'connection' | 'database' | 'schema' | 'table' | 'view';
@@ -159,6 +159,21 @@ export function clearSearchResult(): void {
   setSearch({ result: null, error: null });
 }
 
+// ---- 저장 알림 ---------------------------------------------------------------
+// SQL 편집기 목록이 바뀌면 파일에 남겨야 한다. store 가 workspace 를 직접 부르면
+// 순환 import 가 되므로, 저장 담당이 여기에 자기를 등록한다.
+
+let workspaceListener: (() => void) | null = null;
+
+export function setWorkspaceListener(fn: (() => void) | null): void {
+  workspaceListener = fn;
+}
+
+/** SQL 편집기 구성(목록·제목·활성 탭)이 바뀌었음을 알린다. */
+export function workspaceChanged(): void {
+  if (workspaceListener) workspaceListener();
+}
+
 export function tableTabId(connectionId: string, database: string, schema: string, table: string): string {
   return `table:${connectionId}:${database}:${schema}:${table}`;
 }
@@ -186,6 +201,38 @@ export function openSqlTab(connectionId: string, database: string, schema: strin
   const tab: SqlTab = { id, kind: 'sql', connectionId, database, schema, title: `SQL ${sqlSeq}` };
   if (initialSql) setTabScratch(id, 'sql', initialSql);
   setState((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
+  workspaceChanged();
+}
+
+/**
+ * 저장해 둔 SQL 편집기를 되살린다.
+ * 접속이 아직 열려 있지 않아도 탭은 그대로 뜨고, 내용은 남아 있다.
+ */
+export function restoreSqlTabs(editors: SavedSqlEditor[], activeId: string | null): void {
+  const restored: SqlTab[] = [];
+  for (const e of editors) {
+    if (!e.id) continue;
+    restored.push({
+      id: e.id,
+      kind: 'sql',
+      connectionId: e.connectionId,
+      database: e.database,
+      schema: e.schema,
+      title: e.title,
+    });
+    setTabScratch(e.id, 'sql', e.sql ?? '');
+    if (typeof e.editorRatio === 'number') setTabScratch(e.id, 'editorRatio', e.editorRatio);
+    // 새로 만드는 탭 번호가 되살린 것과 겹치지 않게 올려 둔다.
+    const n = Number(/:(\d+)$/.exec(e.id)?.[1]);
+    if (Number.isFinite(n)) sqlSeq = Math.max(sqlSeq, n);
+  }
+  if (!restored.length) return;
+  setState((s) => {
+    const fresh = restored.filter((t) => !s.tabs.some((x) => x.id === t.id));
+    const tabs = [...s.tabs, ...fresh];
+    const wanted = activeId && tabs.some((t) => t.id === activeId) ? activeId : null;
+    return { tabs, activeTabId: s.activeTabId ?? wanted ?? fresh[0]?.id ?? null };
+  });
 }
 
 /** 접속별 변경 내역 탭을 열거나 이미 열려 있으면 그 탭으로 이동한다. */
@@ -245,15 +292,24 @@ export function closeTab(id: string): void {
     return { tabs, activeTabId };
   });
   disposeTabState(id);
+  workspaceChanged();
 }
 
+/**
+ * 접속을 끊을 때 그 접속의 탭을 닫는다.
+ * 다만 SQL 편집기는 남긴다 — 사용자가 쓴 글이라 접속 상태와 함께 버릴 것이 아니다.
+ * 접속이 없는 동안에는 편집기가 '접속 안 됨' 안내를 띄운다.
+ */
 export function closeTabsOfConnection(connectionId: string): void {
-  const ids = state.tabs.filter((t) => t.connectionId === connectionId).map((t) => t.id);
+  const ids = state.tabs
+    .filter((t) => t.connectionId === connectionId && t.kind !== 'sql')
+    .map((t) => t.id);
   ids.forEach(closeTab);
 }
 
 export function setActiveTab(id: string): void {
   setState({ activeTabId: id });
+  workspaceChanged();
 }
 
 export function updateTab(
@@ -263,6 +319,7 @@ export function updateTab(
   setState((s) => ({
     tabs: s.tabs.map((t) => (t.id === id ? ({ ...t, ...patch } as Tab) : t)),
   }));
+  workspaceChanged();
 }
 
 // ---- 탭별 비반응 상태 --------------------------------------------------------

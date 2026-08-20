@@ -738,3 +738,16 @@ body {
 
 /* 연결이 끊긴 접속 (다음 실행 때 자동으로 다시 연결한다) */
 .dot.stale { background: var(--amber); }
+
+/* 접속이 열려 있지 않은 SQL 편집기 안내 */
+.sql-offline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--amber) 16%, var(--panel));
+  border-bottom: 1px solid var(--border);
+}

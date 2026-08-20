@@ -19,6 +19,7 @@ const store = require('./store');
 const exporter = require('./export');
 const history = require('./history');
 const settings = require('./settings');
+const workspace = require('./workspace');
 
 let mainWindow = null;
 
@@ -31,7 +32,7 @@ function migrateUserData() {
     const target = app.getPath('userData');
     const legacy = path.join(path.dirname(target), 'dbstudio');
     if (legacy === target || !fs.existsSync(legacy)) return;
-    for (const name of ['connections.json', 'query-history.json']) {
+    for (const name of ['connections.json', 'query-history.json', 'sql-editors.json']) {
       const from = path.join(legacy, name);
       const to = path.join(target, name);
       if (fs.existsSync(from) && !fs.existsSync(to)) {
@@ -187,6 +188,14 @@ handle('export:query', async (id, req) => {
 
 handle('settings:get', () => settings.get());
 handle('settings:set', (patch) => settings.set(patch));
+
+handle('workspace:load', () => workspace.load());
+handle('workspace:save', (snapshot) => workspace.save(snapshot));
+// 창이 닫히는 중에는 비동기 응답을 기다릴 수 없어, 마지막 저장만 동기로 받는다.
+ipcMain.on('workspace:flush', (event, snapshot) => {
+  try { workspace.save(snapshot); } catch (_) { /* 종료 중이므로 조용히 넘어간다 */ }
+  event.returnValue = true;
+});
 
 handle('history:list', (query) => history.list(query));
 handle('history:clear', () => history.clear());

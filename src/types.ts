@@ -282,6 +282,24 @@ export interface TxTab {
 
 export type Tab = TableTab | SqlTab | HistoryTab | TxTab;
 
+/** 다음 실행까지 남기는 SQL 편집기 하나. 결과는 저장하지 않는다. */
+export interface SavedSqlEditor {
+  id: string;
+  title: string;
+  connectionId: string;
+  database: string;
+  schema: string;
+  sql: string;
+  editorRatio?: number;
+}
+
+export interface SavedWorkspace {
+  version?: number;
+  savedAt?: string;
+  activeId: string | null;
+  editors: SavedSqlEditor[];
+}
+
 declare global {
   interface Window {
     api: {
@@ -334,6 +352,11 @@ declare global {
       settings: {
         get(): Promise<{ splitOnBlankLine: boolean }>;
         set(patch: Partial<{ splitOnBlankLine: boolean }>): Promise<{ splitOnBlankLine: boolean }>;
+      };
+      workspace: {
+        load(): Promise<SavedWorkspace>;
+        save(snapshot: { activeId: string | null; editors: SavedSqlEditor[] }): Promise<SavedWorkspace>;
+        flush(snapshot: { activeId: string | null; editors: SavedSqlEditor[] }): void;
       };
       history: {
         list(query?: { search?: string; connectionId?: string; onlyErrors?: boolean; limit?: number; offset?: number }):
