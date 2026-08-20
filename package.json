@@ -7,20 +7,20 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"npm:dev:renderer\" \"npm:dev:electron\"",
-    "dev:renderer": "vite",
+    "dev:renderer": "node scripts/with-node.js vite",
     "dev:electron": "wait-on tcp:5273 && cross-env NODE_ENV=development electron .",
-    "build": "vite build",
+    "build": "node scripts/with-node.js vite build",
     "start": "npm run build && electron .",
-    "update": "git pull --ff-only && npm install && npm start",
+    "update": "git pull --ff-only && node scripts/with-node.js npm install && npm start",
     "app": "npm run pack && node scripts/install-app.js",
-    "update:app": "git pull --ff-only && npm install && npm run app",
-    "typecheck": "tsc --noEmit",
+    "update:app": "git pull --ff-only && node scripts/with-node.js npm install && npm run app",
+    "typecheck": "node scripts/with-node.js tsc --noEmit",
     "icons": "node scripts/make-icon.js",
-    "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:linux": "npm run build && electron-builder --linux",
+    "pack": "npm run build && node scripts/with-node.js electron-builder --dir",
+    "dist": "npm run build && node scripts/with-node.js electron-builder",
+    "dist:mac": "npm run build && node scripts/with-node.js electron-builder --mac",
+    "dist:win": "npm run build && node scripts/with-node.js electron-builder --win",
+    "dist:linux": "npm run build && node scripts/with-node.js electron-builder --linux",
     "mcp": "node mcp/server.js",
     "mcp:init": "node mcp/init.js"
   },
@@ -115,5 +115,8 @@
     "typescript": "^5.7.2",
     "vite": "^5.4.11",
     "wait-on": "^8.0.1"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

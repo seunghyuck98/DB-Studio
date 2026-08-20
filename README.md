@@ -21,6 +21,11 @@ MySQL / MariaDB / PostgreSQL 을 지원한다.
 
 Node 20 이상이 필요하다 (`.nvmrc` 에 20.20.2 지정).
 
+`nvm` 기본값이 그보다 낮아도 npm 스크립트가 알아서 `.nvmrc` 버전으로 바꿔 실행한다
+(`[with-node] v16.20.1 → v20.20.2 로 바꿔 실행합니다.` 같은 줄이 보인다).
+쓸 만한 버전이 아예 없으면 무엇을 설치해야 하는지 알려 준다 —
+`crypto$2.getRandomValues is not a function` 처럼 원인을 짐작하기 어려운 오류로 끝나지 않는다.
+
 ```bash
 git clone <저장소 주소>
 cd dbstudio
