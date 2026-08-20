@@ -90,6 +90,37 @@ export async function connect(conn: ConnectionConfig, password?: string): Promis
   }
 }
 
+/**
+ * 같은 설정으로 연결을 다시 맺는다.
+ * 저장된 접속 정보를 그대로 쓰므로 비밀번호를 다시 묻지 않는다.
+ */
+export async function reconnect(connectionId: string): Promise<void> {
+  const s = getState();
+  const conn = s.connections.find((c) => c.id === connectionId);
+  const session = s.sessions[connectionId];
+  if (session?.txActive && session.txChanges) {
+    const ok = window.confirm(
+      `확정되지 않은 변경 ${session.txChanges}건이 있습니다.\n`
+      + '재연결하면 그 변경은 되돌아갑니다. 계속할까요?',
+    );
+    if (!ok) return;
+  }
+  try {
+    setSession(connectionId, await api().connections.reconnect(connectionId));
+    // 재연결하면 서버 쪽 상태가 새로 시작되므로 트리 캐시를 비워 다시 읽게 한다.
+    setState((prev) => {
+      const nodes = { ...prev.nodes };
+      for (const key of Object.keys(nodes)) {
+        if (key.includes(`:${connectionId}:`) || key === nodeId.connection(connectionId)) delete nodes[key];
+      }
+      return { nodes };
+    });
+    notify('success', `${conn?.name ?? '접속'} 을 다시 연결했습니다.`);
+  } catch (e) {
+    notify('error', `재연결 실패: ${message(e)}`);
+  }
+}
+
 export async function disconnect(id: string): Promise<void> {
   const session = getState().sessions[id];
   if (session?.txActive) {

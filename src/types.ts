@@ -29,6 +29,8 @@ export interface SessionStatus {
   currentSchema?: string | null;
   currentDatabase?: string | null;
   serverVersion?: string | null;
+  /** 서버와의 연결이 끊긴 상태인지 (다음 실행 때 자동 재연결) */
+  stale?: boolean;
 }
 
 export interface ColumnMeta {
@@ -290,6 +292,7 @@ declare global {
         test(conn: Partial<ConnectionConfig>): Promise<{ ok: boolean; version: string }>;
         connect(id: string, password?: string): Promise<SessionStatus>;
         disconnect(id: string): Promise<SessionStatus>;
+        reconnect(id: string): Promise<SessionStatus>;
         status(id: string): Promise<SessionStatus>;
         encryptionAvailable(): Promise<boolean>;
       };

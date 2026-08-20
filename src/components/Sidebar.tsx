@@ -3,10 +3,10 @@ import SearchResults from './SearchResults';
 import ContextMenu, { type MenuState } from './ContextMenu';
 import {
   useAppState, setState, setSearch, clearSearchResult, openTableTab, openSqlTab,
-  activeConnectionId, needsServerSearch, sessionOf,
+  activeConnectionId, sessionOf,
   type TreeItem, type AppState,
 } from '../state/store';
-import { connect, disconnect, deleteConnection, toggleNode, refreshNode, runSearch, nodeId } from '../state/actions';
+import { connect, disconnect, reconnect, deleteConnection, toggleNode, refreshNode, runSearch, nodeId } from '../state/actions';
 import type { ConnectionConfig, SearchScopes } from '../types';
 
 const SCOPE_LABELS: { key: keyof SearchScopes; label: string; hint: string }[] = [
@@ -33,12 +33,11 @@ export default function Sidebar() {
 
   const filter = state.treeFilter.trim().toLowerCase();
   const { scopes, allSchemas, running, result, error } = state.search;
-  const deep = needsServerSearch(scopes);
   const connId = activeConnectionId(state);
   const session = sessionOf(connId, state);
 
+  // 타이핑은 트리 이름 필터, Enter 는 항상 DB 전체 검색이다.
   const submit = () => {
-    if (!deep) return;
     const term = state.treeFilter.trim();
     if (term.length < 2) {
       setSearch({ error: '검색어를 2글자 이상 입력하세요.', result: null });
@@ -59,13 +58,15 @@ export default function Sidebar() {
   };
 
   const activeScopes = SCOPE_LABELS.filter((s) => scopes[s.key]).map((s) => s.label).join('·');
+  // 기본은 전체 검색이다. 하나라도 껐으면 좁혀진 상태로 표시한다.
+  const narrowed = !allSchemas || SCOPE_LABELS.some((s) => !scopes[s.key]);
 
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
         <input
           className="input search"
-          placeholder={deep ? '검색어 입력 후 Enter…' : '이름 검색 (DB·스키마·테이블)…'}
+          placeholder="이름 필터 · Enter 로 전체 검색…" 
           value={state.treeFilter}
           onChange={(e) => {
             setState({ treeFilter: e.target.value });
@@ -75,8 +76,8 @@ export default function Sidebar() {
         />
         <div className="scope-box" ref={scopeRef}>
           <button
-            className={`btn small scope-btn ${deep ? 'on' : ''}`}
-            title={`검색 범위: ${activeScopes}`}
+            className={`btn small scope-btn ${narrowed ? 'on' : ''}`}
+            title={narrowed ? `검색 범위가 좁혀져 있습니다: ${activeScopes}` : '검색 범위: 전체'}
             onClick={() => setScopeOpen((v) => !v)}
           >
             범위 ▾
@@ -99,13 +100,11 @@ export default function Sidebar() {
                   onChange={(e) => setSearch({ allSchemas: e.target.checked, result: null })}
                 />
                 <span>{session?.hasSchemaLevel ? '모든 스키마' : '모든 데이터베이스'}</span>
-                <em>끄면 현재 {session?.hasSchemaLevel ? '스키마' : 'DB'}만</em>
+                <em>기본. 끄면 현재 {session?.hasSchemaLevel ? '스키마' : 'DB'}만</em>
               </label>
-              {deep && (
-                <div className="scope-foot">
-                  이름 외 항목은 DB 에 직접 질의하므로 <b>Enter</b> 로 실행합니다.
-                </div>
-              )}
+              <div className="scope-foot">
+                타이핑하면 트리에서 이름을 걸러 내고, <b>Enter</b> 를 누르면 위 범위로 DB 에 직접 질의합니다.
+              </div>
             </div>
           )}
         </div>
@@ -135,7 +134,7 @@ export default function Sidebar() {
             <p className="tree-empty">등록된 접속이 없습니다.<br />상단의 <b>+ 접속</b> 버튼으로 추가하세요.</p>
           )}
           {state.connections.map((c) => (
-            <ConnectionRow key={c.id} conn={c} state={state} filter={deep ? '' : filter} onMenu={setMenu} />
+            <ConnectionRow key={c.id} conn={c} state={state} filter={filter} onMenu={setMenu} />
           ))}
         </div>
       )}
@@ -167,6 +166,11 @@ function ConnectionRow({ conn, state, filter, onMenu }: RowProps & { conn: Conne
         connected
           ? { label: '접속 끊기', action: () => void disconnect(conn.id) }
           : { label: '접속', action: () => void connect(conn) },
+        {
+          label: session?.stale ? '재연결 (연결 끊김)' : '재연결',
+          disabled: !connected,
+          action: () => void reconnect(conn.id),
+        },
         { label: '새로 고침', disabled: !connected, action: () => void refreshNode(item) },
         {
           label: 'SQL 편집기 열기',
@@ -197,9 +201,9 @@ function ConnectionRow({ conn, state, filter, onMenu }: RowProps & { conn: Conne
           open={expanded}
           onClick={() => void toggleNode(item)}
         />
-        <span className={`dot ${connected ? 'on' : 'off'}`} />
+        <span className={`dot ${connected ? (session?.stale ? 'stale' : 'on') : 'off'}`} />
         <span className="tree-label">{conn.name}</span>
-        <span className="tree-detail">{conn.kind}</span>
+        <span className="tree-detail">{session?.stale ? '연결 끊김' : conn.kind}</span>
       </div>
       {connected && expanded && (
         <ChildList nodeKey={id} state={state} filter={filter} onMenu={onMenu} depth={1} />

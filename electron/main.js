@@ -159,6 +159,7 @@ handle('conn:delete', (id) => store.remove(id));
 handle('conn:test', (conn) => db.testConnection(conn));
 handle('conn:connect', (id, password) => db.connect(store.resolve(id, password)));
 handle('conn:disconnect', (id) => db.disconnect(id));
+handle('conn:reconnect', (id) => db.reconnect(id));
 handle('conn:status', (id) => db.status(id));
 handle('conn:encryptionAvailable', () => store.encryptionAvailable());
 

@@ -60,11 +60,6 @@ export interface AppState {
     | null;
 }
 
-/** 이름만 찾을 때는 트리에서 바로 거르고, 나머지는 DB 에 물어봐야 한다. */
-export function needsServerSearch(scopes: SearchScopes): boolean {
-  return scopes.columns || scopes.comments || scopes.source;
-}
-
 const initialState: AppState = {
   connections: [],
   sessions: {},
@@ -74,8 +69,9 @@ const initialState: AppState = {
   activeTabId: null,
   treeFilter: '',
   search: {
-    scopes: { names: true, columns: false, comments: false, source: false },
-    allSchemas: false,
+    // 기본은 넓게 찾는다. 좁히고 싶을 때만 범위를 끈다.
+    scopes: { names: true, columns: true, comments: true, source: true },
+    allSchemas: true,
     running: false,
     result: null,
     error: null,

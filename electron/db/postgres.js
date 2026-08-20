@@ -28,7 +28,20 @@ class PostgresDriver {
       ssl: this.config.ssl ? { rejectUnauthorized: false } : undefined,
       connectionTimeoutMillis: 15000,
       statement_timeout: 0,
+      // 방화벽·로드밸런서가 유휴 TCP 를 끊는 것을 막는다.
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     });
+
+    this.broken = false;
+    this.lastError = null;
+    // 서버가 연결을 끊으면 Client 가 error 를 낸다.
+    // 여기서 받지 않으면 처리되지 않은 이벤트가 되어 프로세스를 위험하게 만든다.
+    this.client.on('error', (e) => {
+      this.broken = true;
+      this.lastError = e;
+    });
+
     await this.client.connect();
     await this.loadTypeNames();
     const r = await this.client.query('SELECT version() AS v, current_schema() AS s');
@@ -40,6 +53,11 @@ class PostgresDriver {
       try { await this.client.end(); } catch (_) { /* 이미 끊겼으면 무시 */ }
       this.client = null;
     }
+  }
+
+  /** 연결이 살아 있는지 가볍게 확인한다 (히스토리에 남기지 않는다). */
+  async ping() {
+    await this.client.query('SELECT 1');
   }
 
   async loadTypeNames() {

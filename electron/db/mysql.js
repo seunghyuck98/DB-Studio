@@ -47,10 +47,28 @@ class MySqlDriver {
       bigNumberStrings: true,
       multipleStatements: false,
       ssl: this.config.ssl ? {} : undefined,
+      // 방화벽·로드밸런서가 유휴 TCP 를 끊는 것을 막는다.
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10000,
     });
+
+    this.broken = false;
+    this.lastError = null;
+    // 서버가 연결을 끊으면 Connection 이 error 를 낸다.
+    // 여기서 받지 않으면 처리되지 않은 이벤트가 되어 프로세스를 위험하게 만든다.
+    this.conn.on('error', (e) => {
+      this.broken = true;
+      this.lastError = e;
+    });
+
     const [rows] = await this.conn.query('SELECT VERSION() AS v, DATABASE() AS db');
     this.serverVersion = rows[0].v;
     return { version: rows[0].v, currentSchema: rows[0].db || null };
+  }
+
+  /** 연결이 살아 있는지 가볍게 확인한다 (히스토리에 남기지 않는다). */
+  async ping() {
+    await this.conn.query('SELECT 1');
   }
 
   async close() {

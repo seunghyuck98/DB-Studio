@@ -735,3 +735,6 @@ body {
 ::-webkit-scrollbar-thumb { background: #4a4e54; border-radius: 6px; border: 3px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: #5b616a; }
 ::-webkit-scrollbar-corner { background: transparent; }
+
+/* 연결이 끊긴 접속 (다음 실행 때 자동으로 다시 연결한다) */
+.dot.stale { background: var(--amber); }

@@ -15,6 +15,28 @@ const DRIVERS = {
 /** 열려 있는 세션들. connectionId -> Session */
 const sessions = new Map();
 
+/**
+ * 유휴 연결이 끊기는 것을 막는 주기. 방화벽·로드밸런서가 흔히 10분 안팎에서 끊으므로
+ * 그보다 넉넉히 짧게 잡는다. TCP keepalive 와 별개로 애플리케이션 레벨에서도 찔러 본다.
+ */
+const HEARTBEAT_MS = 3 * 60 * 1000;
+
+/** 연결 자체가 끊어진 오류인지 (문법 오류 같은 것과 구분한다) */
+function isConnectionError(e) {
+  if (!e) return false;
+  if (e.fatal === true) return true;
+  const code = String(e.code || '');
+  if ([
+    'PROTOCOL_CONNECTION_LOST', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNREFUSED',
+    'ENOTFOUND', 'EHOSTUNREACH', 'ER_SERVER_SHUTDOWN', 'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR',
+    'PROTOCOL_ENQUEUE_AFTER_QUIT', 'CONNECTION_ENDED',
+    // PostgreSQL SQLSTATE
+    '08000', '08003', '08006', '08001', '08004', '57P01', '57P02', '57P03',
+  ].includes(code)) return true;
+  const msg = String(e.message || '').toLowerCase();
+  return /connection terminated|connection closed|server closed the connection|socket hang up|client has encountered a connection error|cannot enqueue|not queryable|connection lost/.test(msg);
+}
+
 class Session {
   constructor(config) {
     const Driver = DRIVERS[config.kind];
@@ -29,6 +51,9 @@ class Session {
     this.txSeq = 0;
     this.currentSchema = null;
     this.info = null;
+    /** 문장 실행 중인지 (하트비트가 끼어들지 않게) */
+    this.busy = false;
+    this.heartbeat = null;
   }
 
   /** 커밋 대상이 되는 변경 문장 수 */
@@ -97,10 +122,75 @@ class Session {
   async open() {
     this.info = await this.driver.connect();
     this.currentSchema = this.info.currentSchema || this.config.database || null;
+    this.startHeartbeat();
     return this.status();
   }
 
+  /**
+   * 유휴 상태에서도 주기적으로 연결을 찔러, 방화벽이나 DB 의 유휴 타임아웃으로
+   * 조용히 끊기는 것을 막는다. 실행 중일 때는 건너뛴다.
+   */
+  startHeartbeat() {
+    this.stopHeartbeat();
+    this.heartbeat = setInterval(() => {
+      if (this.busy || this.driver.broken) return;
+      this.busy = true;
+      // 히스토리·트랜잭션 기록을 남기지 않도록 드라이버를 직접 찌른다.
+      Promise.resolve(this.driver.ping())
+        .catch((e) => { this.driver.broken = true; this.driver.lastError = e; })
+        .finally(() => { this.busy = false; });
+    }, HEARTBEAT_MS);
+    if (typeof this.heartbeat.unref === 'function') this.heartbeat.unref();
+  }
+
+  stopHeartbeat() {
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
+  }
+
+  /** 같은 설정으로 연결을 다시 맺는다. 열려 있던 트랜잭션은 사라진다. */
+  async reopen() {
+    this.stopHeartbeat();
+    try { await this.driver.close(); } catch (_) { /* 이미 끊긴 연결 */ }
+    const Driver = DRIVERS[this.config.kind];
+    const schema = this.currentSchema;
+    this.driver = new Driver(this.config);
+    this.clearTx();
+    this.info = await this.driver.connect();
+    this.currentSchema = this.info.currentSchema || this.config.database || null;
+    // 보고 있던 스키마를 되살린다.
+    if (schema && schema !== this.currentSchema) {
+      try {
+        await this.driver.setCurrentSchema(schema);
+        this.currentSchema = schema;
+      } catch (_) { /* 스키마가 없어졌으면 기본값으로 둔다 */ }
+    }
+    this.startHeartbeat();
+    return this.status();
+  }
+
+  /**
+   * 문장을 실행하기 전에 연결이 살아 있는지 확인한다.
+   * 끊겼으면 다시 연결한다. 트랜잭션이 열려 있었다면 그 내용은 사라졌으므로 알려 준다.
+   */
+  async ensureAlive() {
+    if (!this.driver.broken) return;
+    const hadTx = this.txActive;
+    const pending = this.txChanges;
+    await this.reopen();
+    if (hadTx) {
+      throw new Error(
+        '연결이 끊겨 다시 연결했습니다. 열려 있던 트랜잭션은 서버에서 사라졌습니다'
+        + `${pending ? ` (확정되지 않은 변경 ${pending}건은 되돌아갔습니다)` : ''}.`
+        + ' 다시 실행해 주세요.',
+      );
+    }
+  }
+
   async close() {
+    this.stopHeartbeat();
     if (this.txActive) {
       try { await this.driver.rollback(); } catch (_) { /* 연결이 끊겨도 세션은 정리한다 */ }
       this.clearTx();
@@ -120,6 +210,8 @@ class Session {
       currentSchema: this.currentSchema,
       currentDatabase: this.driver.currentDatabase || this.currentSchema,
       serverVersion: this.info ? this.info.version : null,
+      /** 서버와의 연결이 끊긴 상태인지 (다음 실행 때 자동으로 다시 연결한다) */
+      stale: !!this.driver.broken,
     };
   }
 
@@ -162,8 +254,10 @@ class Session {
    * 실행 결과는 쿼리 히스토리에 남는다.
    */
   async exec(sql, params = [], source = 'sql') {
+    await this.ensureAlive();
     await this.ensureTx();
     const started = Date.now();
+    this.busy = true;
     try {
       const r = await this.driver.query(sql, params);
       if (this.txActive) this.txStatements++;
@@ -172,7 +266,37 @@ class Session {
       return r;
     } catch (e) {
       this.log(sql, Date.now() - started, source, { ok: false, error: e.message });
+
+      // 실행 도중 끊긴 경우. 트랜잭션이 없었다면 조용히 다시 연결해 한 번만 재시도한다.
+      // 트랜잭션이 있었다면 이미 사라졌으므로 재시도하지 않고 사실대로 알린다.
+      if (isConnectionError(e)) {
+        this.driver.broken = true;
+        const hadTx = this.txActive;
+        const pending = this.txChanges;
+        try {
+          await this.reopen();
+        } catch (re) {
+          throw new Error(`연결이 끊겼고 다시 연결하지 못했습니다: ${re.message}`);
+        }
+        if (hadTx) {
+          throw new Error(
+            '연결이 끊겨 다시 연결했습니다. 열려 있던 트랜잭션은 서버에서 사라졌습니다'
+            + `${pending ? ` (확정되지 않은 변경 ${pending}건은 되돌아갔습니다)` : ''}.`
+            + ' 다시 실행해 주세요.',
+          );
+        }
+        this.busy = true;
+        try {
+          const r = await this.driver.query(sql, params);
+          this.log(sql, Date.now() - started, source, { rows: r.rowCount, affected: r.affectedRows, ok: true });
+          return r;
+        } finally {
+          this.busy = false;
+        }
+      }
       throw e;
+    } finally {
+      this.busy = false;
     }
   }
 
@@ -232,6 +356,12 @@ function get(id) {
   return s;
 }
 
+/** 사용자가 트리에서 '재연결' 을 눌렀을 때. 저장된 설정을 그대로 다시 쓴다. */
+async function reconnect(id) {
+  const s = get(id);
+  return s.reopen();
+}
+
 function status(id) {
   const s = sessions.get(id);
   return s ? s.status() : { connected: false };
@@ -253,10 +383,45 @@ async function testConnection(config) {
   }
 }
 
+
+/**
+ * 드라이버를 직접 쓰는 작업(메타데이터·검색 등)도 끊긴 연결에서 되살아나게 감싼다.
+ * exec() 를 거치지 않는 경로가 있어서, 그쪽만 재연결이 안 되던 문제를 막는다.
+ * @param {boolean} retry 순수 조회처럼 다시 실행해도 안전한 작업만 true
+ */
+async function withAlive(id, fn, retry = false) {
+  const s = get(id);
+  await s.ensureAlive();
+  s.busy = true;
+  try {
+    return await fn(s);
+  } catch (e) {
+    if (!retry || !isConnectionError(e)) throw e;
+    s.driver.broken = true;
+    const hadTx = s.txActive;
+    const pending = s.txChanges;
+    await s.reopen();
+    if (hadTx) {
+      throw new Error(
+        '연결이 끊겨 다시 연결했습니다. 열려 있던 트랜잭션은 서버에서 사라졌습니다'
+        + `${pending ? ` (확정되지 않은 변경 ${pending}건은 되돌아갔습니다)` : ''}.`
+        + ' 다시 실행해 주세요.',
+      );
+    }
+    return fn(s);
+  } finally {
+    s.busy = false;
+  }
+}
+
 // ---- 메타데이터 -------------------------------------------------------------
 
+
 async function meta(id, action, args = {}) {
-  const s = get(id);
+  return withAlive(id, (s) => metaOn(s, action, args), true);
+}
+
+function metaOn(s, action, args) {
   const d = s.driver;
   switch (action) {
     case 'databases': return d.listDatabases();
@@ -273,10 +438,11 @@ async function meta(id, action, args = {}) {
 }
 
 async function setSchema(id, schema) {
-  const s = get(id);
-  await s.driver.setCurrentSchema(schema);
-  s.currentSchema = schema;
-  return s.status();
+  return withAlive(id, async (s) => {
+    await s.driver.setCurrentSchema(schema);
+    s.currentSchema = schema;
+    return s.status();
+  });
 }
 
 async function setDatabase(id, database) {
@@ -343,6 +509,7 @@ async function countData(id, { schema, table, filter = '' }) {
  */
 async function applyChanges(id, { schema, table, changes }) {
   const s = get(id);
+  await s.ensureAlive();
   const d = s.driver;
   const target = d.qualify(schema, table);
   const executed = [];
@@ -454,7 +621,10 @@ async function executeScript(id, sql, opts = {}) {
  * @param {{term:string, schemas?:string[], scopes?:object, limit?:number}} req
  */
 async function searchObjects(id, req) {
-  const s = get(id);
+  return withAlive(id, (s) => searchOn(s, req), true);
+}
+
+async function searchOn(s, req) {
   const term = String(req.term || '').trim();
   if (term.length < 2) throw new Error('검색어를 2글자 이상 입력하세요.');
 
@@ -497,6 +667,7 @@ async function searchObjects(id, req) {
 /** 문장의 실행 계획을 가져온다. analyze 를 켜면 쿼리가 실제로 실행된다. */
 async function explain(id, sql, opts = {}) {
   const s = get(id);
+  await s.ensureAlive();
   const stmt = splitStatements(sql, { blankLine: !!opts.splitOnBlankLine })[0];
   if (!stmt) throw new Error('실행 계획을 볼 문장이 없습니다.');
   await s.ensureTx();
@@ -528,6 +699,7 @@ function previewColumnDDL(id, { schema, table, spec }) {
  */
 async function executeDDL(id, statements) {
   const s = get(id);
+  await s.ensureAlive();
   const list = (Array.isArray(statements) ? statements : splitStatements(String(statements)).map((x) => x.text))
     .map((x) => String(x).trim().replace(/;\s*$/, ''))
     .filter(Boolean);
@@ -560,7 +732,7 @@ function pendingTx(id) {
 }
 
 module.exports = {
-  connect, disconnect, status, listOpen, testConnection, pendingTx,
+  connect, disconnect, reconnect, status, listOpen, testConnection, pendingTx,
   meta, setSchema, setDatabase,
   selectData, countData, applyChanges, fetchForExport,
   searchObjects,

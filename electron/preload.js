@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('api', {
     test: (conn) => call('conn:test', conn),
     connect: (id, password) => call('conn:connect', id, password),
     disconnect: (id) => call('conn:disconnect', id),
+    reconnect: (id) => call('conn:reconnect', id),
     status: (id) => call('conn:status', id),
     encryptionAvailable: () => call('conn:encryptionAvailable'),
   },
