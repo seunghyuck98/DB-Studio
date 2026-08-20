@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import CodeMirror from '@uiw/react-codemirror';
 import { sql, MySQL, PostgreSQL } from '@codemirror/lang-sql';
 import { EditorView, keymap } from '@codemirror/view';
-import { Prec, type Extension } from '@codemirror/state';
+import { EditorState, Prec, type Extension } from '@codemirror/state';
 import ResultGrid from './ResultGrid';
 import PlanView from './PlanView';
 import {
@@ -14,6 +14,29 @@ import { scheduleWorkspaceSave } from '../state/workspace';
 import { statementAt } from '../lib/sqlparse';
 import { tableLink, type LinkPart } from '../lib/tablelink';
 import type { ExplainResult, SqlTab, StatementResult } from '../types';
+
+/**
+ * basicSetup 은 반드시 같은 객체를 계속 넘겨야 한다.
+ * react-codemirror 는 이 값의 identity 가 바뀌면 에디터 확장 전체를 다시 구성하는데,
+ * 그러면 ⌘F 검색 패널처럼 확장 안에 든 상태가 전부 사라진다
+ * (패널을 클릭 → 리렌더 → 패널이 닫히던 문제의 원인).
+ */
+const BASIC_SETUP = { foldGutter: true, highlightActiveLine: true, autocompletion: true };
+
+/** ⌘F 검색 패널 문구 한글화 */
+const KOREAN_PHRASES = EditorState.phrases.of({
+  'Find': '찾기',
+  'Replace': '바꾸기',
+  'next': '다음',
+  'previous': '이전',
+  'all': '모두',
+  'match case': '대소문자 구분',
+  'by word': '단어 단위',
+  'regexp': '정규식',
+  'replace': '바꾸기',
+  'replace all': '모두 바꾸기',
+  'close': '닫기',
+});
 
 export default function SqlEditor({ tab }: { tab: SqlTab }) {
   const state = useAppState();
@@ -185,6 +208,7 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
   const extensions = useMemo<Extension[]>(() => [
     sql({ dialect, upperCaseKeywords: true }),
     EditorView.lineWrapping,
+    KOREAN_PHRASES,
     tableLink((parts) => linkRef.current(parts)),
     Prec.highest(keymap.of([
       { key: 'Mod-Enter', preventDefault: true, run: () => { runRef.current(false); return true; } },
@@ -250,7 +274,7 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
           extensions={extensions}
           onChange={setText}
           onCreateEditor={(view) => { viewRef.current = view; }}
-          basicSetup={{ foldGutter: true, highlightActiveLine: true, autocompletion: true }}
+          basicSetup={BASIC_SETUP}
         />
       </div>
 

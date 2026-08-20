@@ -98,6 +98,9 @@ export function getState(): AppState {
 
 export function setState(patch: Partial<AppState> | ((s: AppState) => Partial<AppState>)): void {
   const next = typeof patch === 'function' ? patch(state) : patch;
+  // 바뀐 게 없으면 알리지 않는다. 빈 패치로도 새 객체를 만들면 모든 구독자가
+  // 다시 그려지고, 그 리렌더가 CodeMirror 재구성 같은 부작용을 일으킨다.
+  if (Object.keys(next).length === 0) return;
   state = { ...state, ...next };
   listeners.forEach((l) => l());
 }

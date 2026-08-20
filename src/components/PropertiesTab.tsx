@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql as sqlLang, MySQL, PostgreSQL } from '@codemirror/lang-sql';
 import DdlPreviewDialog from './DdlPreviewDialog';
@@ -20,6 +20,18 @@ const SECTIONS: { key: Section; label: string }[] = [
   { key: 'ddl', label: 'DDL' },
 ];
 
+/**
+ * react-codemirror 는 basicSetup/extensions 의 identity 가 바뀌면 에디터를 전부
+ * 다시 구성한다 (검색 패널 같은 확장 상태가 사라진다). 항상 같은 객체를 넘긴다.
+ */
+const BASIC_SETUP = { foldGutter: true, highlightActiveLine: true, autocompletion: true };
+
+/** 행의 값 중 하나라도 검색어를 담고 있는지 (대소문자 무시) */
+function rowMatch(q: string, values: unknown[]): boolean {
+  if (!q) return true;
+  return values.some((v) => String(v ?? '').toLowerCase().includes(q));
+}
+
 interface Loaded {
   columns: TableColumn[];
   keys: KeyMeta[];
@@ -34,8 +46,42 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
   const [data, setData] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [find, setFind] = useState('');
+  const findRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setTabScratch(tab.id, 'propSection', section); }, [tab.id, section]);
+
+  // ⌘/Ctrl+F 로 이 표 안 찾기. DDL 은 편집기가 자체 검색(⌘F)을 가지고 있어 건드리지 않는다.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'f' || e.shiftKey || e.altKey) return;
+      if (e.defaultPrevented) return; // DDL 편집기(CodeMirror)가 이미 받았다
+      const s = getState();
+      if (s.focusedPane !== (tab.pane === 1 ? 1 : 0)) return; // 다른 화면이 포커스면 그쪽 몫
+      e.preventDefault();
+      setFindOpen(true);
+      requestAnimationFrame(() => findRef.current?.select());
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [tab.pane]);
+
+  const closeFind = () => { setFindOpen(false); setFind(''); };
+
+  // 검색어로 각 표의 행을 거른다.
+  const q = findOpen ? find.trim().toLowerCase() : '';
+  const view = useMemo<Loaded | null>(() => {
+    if (!data || !q) return data;
+    return {
+      ...data,
+      columns: data.columns.filter((c) => rowMatch(q, [c.name, c.dataType, c.defaultValue, c.comment])),
+      keys: data.keys.filter((k) => rowMatch(q, [k.name, k.type, k.columns.join(',')])),
+      foreignKeys: data.foreignKeys.filter((f) => rowMatch(q, [f.name, f.columns.join(','), f.referencedSchema, f.referencedTable, f.referencedColumns.join(',')])),
+      references: data.references.filter((r) => rowMatch(q, [r.name, r.sourceSchema, r.sourceTable, r.columns.join(','), r.referencedColumns.join(',')])),
+      indexes: data.indexes.filter((i) => rowMatch(q, [i.name, i.type, i.columns.join(',')])),
+    };
+  }, [data, q]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,17 +128,36 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
         <button className="btn small" onClick={() => void load()} disabled={loading}>새로 고침</button>
       </div>
 
+      {findOpen && section !== 'ddl' && data && (
+        <div className="props-find">
+          <span className="icon icon-search" aria-hidden />
+          <input
+            ref={findRef}
+            className="input"
+            placeholder="이 표에서 찾기… (이름·타입·주석)"
+            value={find}
+            autoFocus
+            onChange={(e) => setFind(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') closeFind(); }}
+          />
+          {q && view && (
+            <span className="hint">{view[section].length} / {data[section].length}</span>
+          )}
+          <button className="icon-btn" aria-label="찾기 닫기" onClick={closeFind}>×</button>
+        </div>
+      )}
+
       {loading && <div className="pane-message">불러오는 중…</div>}
       {error && <div className="pane-message error">{error}</div>}
 
-      {data && !loading && (
+      {view && !loading && (
         <div className="props-body">
-          {section === 'columns' && <ColumnsPanel tab={tab} rows={data.columns} onChanged={load} />}
-          {section === 'keys' && <KeysTable rows={data.keys} />}
-          {section === 'foreignKeys' && <ForeignKeysTable rows={data.foreignKeys} />}
-          {section === 'references' && <ReferencesTable rows={data.references} />}
-          {section === 'indexes' && <IndexesTable rows={data.indexes} />}
-          {section === 'ddl' && <DdlPanel tab={tab} ddl={data.ddl} onChanged={load} />}
+          {section === 'columns' && <ColumnsPanel tab={tab} rows={view.columns} allRows={data!.columns} onChanged={load} />}
+          {section === 'keys' && <KeysTable rows={view.keys} />}
+          {section === 'foreignKeys' && <ForeignKeysTable rows={view.foreignKeys} />}
+          {section === 'references' && <ReferencesTable rows={view.references} />}
+          {section === 'indexes' && <IndexesTable rows={view.indexes} />}
+          {section === 'ddl' && <DdlPanel tab={tab} ddl={view.ddl} onChanged={load} />}
         </div>
       )}
     </div>
@@ -122,7 +187,14 @@ function toSpec(c: TableColumn): ColumnSpec {
   };
 }
 
-function ColumnsPanel({ tab, rows, onChanged }: { tab: TableTab; rows: TableColumn[]; onChanged: () => void }) {
+function ColumnsPanel({ tab, rows, allRows, onChanged }: {
+  tab: TableTab;
+  /** 화면에 보여줄 (찾기로 걸러진) 행 */
+  rows: TableColumn[];
+  /** 편집을 시작할 때 쓰는 전체 행 — 걸러진 목록으로 편집하면 안 보이는 컬럼을 놓친다 */
+  allRows: TableColumn[];
+  onChanged: () => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<DraftColumn[]>([]);
   const [preview, setPreview] = useState<string[] | null>(null);
@@ -131,7 +203,7 @@ function ColumnsPanel({ tab, rows, onChanged }: { tab: TableTab; rows: TableColu
   const editable = tab.objectKind === 'table';
 
   const startEdit = () => {
-    setDrafts(rows.map((c, i) => ({ ...toSpec(c), key: `c${i}`, original: toSpec(c), dropped: false })));
+    setDrafts(allRows.map((c, i) => ({ ...toSpec(c), key: `c${i}`, original: toSpec(c), dropped: false })));
     setEditing(true);
   };
 
@@ -247,7 +319,7 @@ function ColumnsPanel({ tab, rows, onChanged }: { tab: TableTab; rows: TableColu
                     onChange={(e) => patch(d.key, { defaultValue: e.target.value === '' ? null : e.target.value })}
                   />
                 </td>
-                <td>{rows.find((c) => c.name === d.original?.name)?.primaryKey ? 'PK' : ''}</td>
+                <td>{allRows.find((c) => c.name === d.original?.name)?.primaryKey ? 'PK' : ''}</td>
                 <td>{d.autoIncrement ? '✓' : ''}</td>
                 <td><input className="input cell" value={d.comment} disabled={d.dropped} onChange={(e) => patch(d.key, { comment: e.target.value })} /></td>
                 <td className="center">
@@ -288,6 +360,8 @@ function DdlPanel({ tab, ddl, onChanged }: { tab: TableTab; ddl: string; onChang
   const [copied, setCopied] = useState(false);
   const session = sessionOf(tab.connectionId, getState());
   const dialect = session?.kind === 'postgres' ? PostgreSQL : MySQL;
+  // identity 가 흔들리면 리렌더마다 에디터가 재구성돼 ⌘F 패널이 닫힌다.
+  const extensions = useMemo(() => [sqlLang({ dialect, upperCaseKeywords: true })], [dialect]);
   const dirty = text !== ddl;
 
   useEffect(() => { setText(ddl); }, [ddl]);
@@ -323,9 +397,9 @@ function DdlPanel({ tab, ddl, onChanged }: { tab: TableTab; ddl: string; onChang
           value={text}
           height="100%"
           theme="dark"
-          extensions={[sqlLang({ dialect, upperCaseKeywords: true })]}
+          extensions={extensions}
           onChange={setText}
-          basicSetup={{ foldGutter: true, highlightActiveLine: true, autocompletion: true }}
+          basicSetup={BASIC_SETUP}
         />
       </div>
 

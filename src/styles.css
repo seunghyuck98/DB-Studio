@@ -801,3 +801,82 @@ body {
   cursor: pointer;
   color: var(--accent);
 }
+
+/* ---- ⌘F 검색 패널 (CodeMirror 기본이 너무 작다) ---- */
+.cm-panels {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text);
+}
+.cm-panel.cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+.cm-panel.cm-search input.cm-textfield {
+  font-size: 13px;
+  padding: 4px 8px;
+  min-width: 180px;
+  background: var(--bg-sunken);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.cm-panel.cm-search input.cm-textfield:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.cm-panel.cm-search button.cm-button {
+  font-size: 12.5px;
+  padding: 4px 10px;
+  background: #3a3d42;
+  background-image: none;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.cm-panel.cm-search button.cm-button:hover { background: #45484e; }
+.cm-panel.cm-search label {
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+}
+.cm-panel.cm-search [name='close'] {
+  position: static;
+  margin-left: auto;
+  font-size: 16px;
+  padding: 0 6px;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.cm-panel.cm-search [name='close']:hover { color: var(--text); }
+
+/* ---- Properties 탭 찾기 막대 ---- */
+.props-find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.props-find .input { flex: 0 1 320px; font-size: 13px; }
+
+/* ---- SQL 실행 오류 영역 스크롤 ---- */
+.sql-results .pane-message.error {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+.sql-results .pane-message.error .code-block {
+  /* 오류문·SQL 이 길어도 영역 안에서 함께 스크롤된다 */
+  max-width: 100%;
+}
