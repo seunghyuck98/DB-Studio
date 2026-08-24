@@ -127,6 +127,45 @@ class MySqlDriver {
   async rollback() { await this.conn.query('ROLLBACK'); }
 
   // ---- 메타데이터 -----------------------------------------------------------
+  /**
+   * 테이블 권한. MySQL 은 권한이 테이블·스키마·전역 계층에 나뉘어 있어
+   * 테이블에 직접 준 것과 스키마 전체에 준 것을 범위 표시와 함께 돌려준다.
+   * (전역 권한까지 합치면 목록이 계정 권한표가 되어 버려 뺐다)
+   */
+  async listPrivileges(schema, table) {
+    const pick = (rows, scope) => rows.map((g) => ({
+      grantee: g.GRANTEE ?? g.grantee,
+      scope,
+      privilege: g.PRIVILEGE_TYPE ?? g.privilege_type,
+      grantable: (g.IS_GRANTABLE ?? g.is_grantable) === 'YES',
+    }));
+    // --skip-grant-tables 같은 환경에서는 권한 표 조회가 실패할 수 있다.
+    let tableGrants = [];
+    let schemaGrants = [];
+    try {
+      tableGrants = await this.rows(
+        `SELECT grantee, privilege_type, is_grantable
+           FROM information_schema.table_privileges
+          WHERE table_schema = ? AND table_name = ?
+          ORDER BY grantee, privilege_type`,
+        [schema, table],
+      );
+      schemaGrants = await this.rows(
+        `SELECT grantee, privilege_type, is_grantable
+           FROM information_schema.schema_privileges
+          WHERE table_schema = ?
+          ORDER BY grantee, privilege_type`,
+        [schema],
+      );
+    } catch (_) {
+      /* 권한 표를 못 읽는 서버 설정 — 빈 목록으로 둔다 */
+    }
+    return {
+      owner: null, // MySQL 은 테이블 소유자 개념이 없다
+      grants: [...pick(tableGrants, 'table'), ...pick(schemaGrants, 'schema')],
+    };
+  }
+
   async listDatabases() {
     const r = await this.rows(
       `SELECT schema_name AS name, default_character_set_name AS charset, default_collation_name AS collation

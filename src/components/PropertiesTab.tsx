@@ -6,10 +6,10 @@ import { getTabScratch, setTabScratch, notify, sessionOf, getState, openSqlTab }
 import { message } from '../state/actions';
 import type {
   ColumnChangeSpec, ColumnSpec, ForeignKeyMeta, IndexMeta, KeyMeta,
-  ReferenceMeta, TableColumn, TableTab,
+  ReferenceMeta, TableColumn, TableGrant, TableMeta, TablePrivileges, TableTab,
 } from '../types';
 
-type Section = 'columns' | 'keys' | 'foreignKeys' | 'references' | 'indexes' | 'ddl';
+type Section = 'columns' | 'keys' | 'foreignKeys' | 'references' | 'indexes' | 'privileges' | 'ddl';
 
 const SECTIONS: { key: Section; label: string }[] = [
   { key: 'columns', label: '컬럼' },
@@ -17,8 +17,23 @@ const SECTIONS: { key: Section; label: string }[] = [
   { key: 'foreignKeys', label: '외래키' },
   { key: 'references', label: '참조' },
   { key: 'indexes', label: '인덱스' },
+  { key: 'privileges', label: '권한' },
   { key: 'ddl', label: 'DDL' },
 ];
+
+function fmtBytes(n: number): string {
+  if (!n) return '0';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function fmtDate(v: string | null): string {
+  if (!v) return '';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
+}
 
 /**
  * react-codemirror 는 basicSetup/extensions 의 identity 가 바뀌면 에디터를 전부
@@ -38,7 +53,10 @@ interface Loaded {
   foreignKeys: ForeignKeyMeta[];
   references: ReferenceMeta[];
   indexes: IndexMeta[];
+  privileges: TablePrivileges;
   ddl: string;
+  /** 테이블 자체 정보 (엔진·행 추정·크기·주석 등) */
+  info: TableMeta | null;
 }
 
 export default function PropertiesTab({ tab }: { tab: TableTab }) {
@@ -80,6 +98,10 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
       foreignKeys: data.foreignKeys.filter((f) => rowMatch(q, [f.name, f.columns.join(','), f.referencedSchema, f.referencedTable, f.referencedColumns.join(',')])),
       references: data.references.filter((r) => rowMatch(q, [r.name, r.sourceSchema, r.sourceTable, r.columns.join(','), r.referencedColumns.join(',')])),
       indexes: data.indexes.filter((i) => rowMatch(q, [i.name, i.type, i.columns.join(',')])),
+      privileges: {
+        ...data.privileges,
+        grants: data.privileges.grants.filter((g) => rowMatch(q, [g.grantee, g.privilege])),
+      },
     };
   }, [data, q]);
 
@@ -88,15 +110,18 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
     setError(null);
     const args = { schema: tab.schema, table: tab.table };
     try {
-      const [columns, keys, foreignKeys, references, indexes, ddl] = await Promise.all([
+      const [columns, keys, foreignKeys, references, indexes, privileges, ddl, tables] = await Promise.all([
         window.api.meta.get(tab.connectionId, 'columns', args),
         window.api.meta.get(tab.connectionId, 'keys', args),
         window.api.meta.get(tab.connectionId, 'foreignKeys', args),
         window.api.meta.get(tab.connectionId, 'references', args),
         window.api.meta.get(tab.connectionId, 'indexes', args),
+        window.api.meta.get(tab.connectionId, 'privileges', args),
         window.api.meta.get(tab.connectionId, 'ddl', { ...args, kind: tab.objectKind }),
+        window.api.meta.get(tab.connectionId, 'tables', { schema: tab.schema }),
       ]);
-      setData({ columns, keys, foreignKeys, references, indexes, ddl });
+      const info = (tables as TableMeta[]).find((t) => t.name === tab.table) ?? null;
+      setData({ columns, keys, foreignKeys, references, indexes, privileges, ddl, info });
     } catch (e) {
       setError(message(e));
     } finally {
@@ -114,6 +139,7 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
 
   return (
     <div className="props">
+      {data?.info && <TableInfoBar tab={tab} info={data.info} owner={data.privileges.owner} />}
       <div className="props-tabs">
         {SECTIONS.map((s) => (
           <button
@@ -141,7 +167,11 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
             onKeyDown={(e) => { if (e.key === 'Escape') closeFind(); }}
           />
           {q && view && (
-            <span className="hint">{view[section].length} / {data[section].length}</span>
+            <span className="hint">
+              {section === 'privileges' ? view.privileges.grants.length : view[section].length}
+              {' / '}
+              {section === 'privileges' ? data.privileges.grants.length : data[section].length}
+            </span>
           )}
           <button className="icon-btn" aria-label="찾기 닫기" onClick={closeFind}>×</button>
         </div>
@@ -157,6 +187,7 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
           {section === 'foreignKeys' && <ForeignKeysTable rows={view.foreignKeys} />}
           {section === 'references' && <ReferencesTable rows={view.references} />}
           {section === 'indexes' && <IndexesTable rows={view.indexes} />}
+          {section === 'privileges' && <PrivilegesTable data={view.privileges} />}
           {section === 'ddl' && <DdlPanel tab={tab} ddl={view.ddl} onChanged={load} />}
         </div>
       )}
@@ -414,6 +445,90 @@ function DdlPanel({ tab, ddl, onChanged }: { tab: TableTab; ddl: string; onChang
           onApplied={onChanged}
         />
       )}
+    </div>
+  );
+}
+
+// ---- 테이블 정보 ----------------------------------------------------------------
+
+/** 섹션 칩 위에 항상 보이는 테이블 요약 정보. */
+function TableInfoBar({ tab, info, owner }: { tab: TableTab; info: TableMeta; owner: string | null }) {
+  const items: { label: string; value: string }[] = [];
+  items.push({ label: '종류', value: info.kind === 'view' ? '뷰' : '테이블' });
+  if (owner) items.push({ label: '소유자', value: owner });
+  if (info.engine) items.push({ label: '엔진', value: info.engine });
+  if (info.rowsEstimate != null) items.push({ label: '행 (추정)', value: info.rowsEstimate.toLocaleString() });
+  if (info.sizeBytes) items.push({ label: '크기', value: fmtBytes(info.sizeBytes) });
+  if (info.collation) items.push({ label: '정렬 규칙', value: info.collation });
+  if (info.createdAt) items.push({ label: '생성', value: fmtDate(info.createdAt) });
+  if (info.updatedAt) items.push({ label: '변경', value: fmtDate(info.updatedAt) });
+
+  return (
+    <div className="props-info">
+      <div className="props-info-title">
+        <span className={`icon icon-${info.kind === 'view' ? 'view' : 'table'}`} aria-hidden />
+        <b className="mono">{tab.schema}.{tab.table}</b>
+        {info.comment && <span className="props-info-comment" title={info.comment}>{info.comment}</span>}
+      </div>
+      <div className="props-info-items">
+        {items.map((it) => (
+          <span key={it.label} className="props-info-item">
+            <span className="props-info-label">{it.label}</span>
+            <span className="mono">{it.value}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---- 권한 -----------------------------------------------------------------------
+
+function PrivilegesTable({ data }: { data: TablePrivileges }) {
+  // 계정·범위별로 권한을 한 줄로 모은다.
+  const grouped = new Map<string, { grantee: string; scope: TableGrant['scope']; privileges: string[] }>();
+  for (const g of data.grants) {
+    const key = `${g.grantee}\u0000${g.scope}`;
+    const row = grouped.get(key) ?? { grantee: g.grantee, scope: g.scope, privileges: [] };
+    row.privileges.push(g.privilege + (g.grantable ? ' *' : ''));
+    grouped.set(key, row);
+  }
+  const rows = [...grouped.values()];
+
+  if (!rows.length && !data.owner) {
+    return (
+      <div className="pane-message muted">
+        권한 정보가 없습니다. 현재 계정이 볼 수 있는 부여 내역이 없거나,
+        서버가 권한 표 조회를 허용하지 않는 설정입니다.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <table className="meta-table">
+        <thead><tr><th>대상</th><th>범위</th><th>권한</th></tr></thead>
+        <tbody>
+          {data.owner && (
+            <tr>
+              <td className="mono strong">{data.owner}</td>
+              <td>소유자</td>
+              <td className="mono">ALL (테이블 소유자)</td>
+            </tr>
+          )}
+          {rows.map((r) => (
+            <tr key={`${r.grantee}-${r.scope}`}>
+              <td className="mono strong">{r.grantee}</td>
+              <td>{r.scope === 'table' ? '테이블' : '스키마 전체'}</td>
+              <td className="mono">{r.privileges.join(', ')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="hint" style={{ padding: '6px 8px' }}>
+        * — 다른 계정에 권한을 줄 수 있음 (WITH GRANT OPTION).
+        현재 계정이 볼 수 있는 부여 내역만 보입니다.
+      </p>
     </div>
   );
 }

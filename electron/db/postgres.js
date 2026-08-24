@@ -104,6 +104,37 @@ class PostgresDriver {
   async rollback() { await this.client.query('ROLLBACK'); }
 
   // ---- 메타데이터 -----------------------------------------------------------
+  /**
+   * 테이블 권한: 소유자와 계정별로 받은 권한.
+   * information_schema.role_table_grants 는 현재 계정이 볼 수 있는 부여분만 보여 준다.
+   */
+  async listPrivileges(schema, table) {
+    const ownerRows = await this.rows(
+      `SELECT r.rolname AS owner
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         JOIN pg_roles r ON r.oid = c.relowner
+        WHERE n.nspname = $1 AND c.relname = $2`,
+      [schema, table],
+    );
+    const grants = await this.rows(
+      `SELECT grantee, privilege_type AS privilege, is_grantable
+         FROM information_schema.role_table_grants
+        WHERE table_schema = $1 AND table_name = $2
+        ORDER BY grantee, privilege_type`,
+      [schema, table],
+    );
+    return {
+      owner: ownerRows[0]?.owner ?? null,
+      grants: grants.map((g) => ({
+        grantee: g.grantee,
+        scope: 'table',
+        privilege: g.privilege,
+        grantable: g.is_grantable === 'YES',
+      })),
+    };
+  }
+
   async listDatabases() {
     const r = await this.rows(
       `SELECT datname AS name, pg_encoding_to_char(encoding) AS charset, datcollate AS collation

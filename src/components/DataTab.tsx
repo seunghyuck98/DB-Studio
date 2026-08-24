@@ -35,6 +35,41 @@ export default function DataTab({ tab }: { tab: TableTab }) {
   const [saving, setSaving] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
 
+  // 필터 입력의 컬럼 제안 목록
+  const filterRef = useRef<HTMLInputElement>(null);
+  const [suggest, setSuggest] = useState<string[]>([]);
+  const [suggestIdx, setSuggestIdx] = useState(0);
+  /** 지금 커서 앞에서 입력 중인 단어 (이걸 컬럼 이름으로 바꿔치기한다) */
+  const wordRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+
+  /** 입력값이 바뀔 때마다, 커서 앞 단어를 담고 있는 컬럼들을 제안한다. */
+  const updateSuggest = useCallback((value: string, caret: number) => {
+    const before = value.slice(0, caret);
+    const m = /[A-Za-z0-9_$가-힣]+$/.exec(before);
+    if (!m) { setSuggest([]); return; }
+    const word = m[0].toLowerCase();
+    wordRef.current = { start: caret - m[0].length, end: caret };
+    const names = columns
+      .filter((c) => c.name.toLowerCase().includes(word))
+      .map((c) => c.name);
+    // 이미 완성된 이름 하나만 남았으면 더 보여줄 게 없다.
+    if (names.length === 1 && names[0].toLowerCase() === word) { setSuggest([]); return; }
+    setSuggest(names.slice(0, 12));
+    setSuggestIdx(0);
+  }, [columns]);
+
+  /** 제안을 골라 입력 중인 단어를 컬럼 이름으로 바꾼다. */
+  const pickSuggest = useCallback((name: string) => {
+    const { start, end } = wordRef.current;
+    const next = filter.slice(0, start) + name + filter.slice(end);
+    setFilter(next);
+    setSuggest([]);
+    requestAnimationFrame(() => {
+      const el = filterRef.current;
+      if (el) { el.focus(); el.setSelectionRange(start + name.length, start + name.length); }
+    });
+  }, [filter]);
+
   useEffect(() => { setTabScratch(tab.id, 'limit', limit); }, [tab.id, limit]);
   useEffect(() => { setTabScratch(tab.id, 'offset', offset); }, [tab.id, offset]);
   useEffect(() => { setTabScratch(tab.id, 'filter', appliedFilter); }, [tab.id, appliedFilter]);
@@ -229,13 +264,49 @@ export default function DataTab({ tab }: { tab: TableTab }) {
   return (
     <div className="data-tab">
       <div className="data-toolbar">
-        <input
-          className="input filter"
-          placeholder="필터 (WHERE 절, 예: status = 'A' AND id > 100)"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') applyFilter(); }}
-        />
+        <div className="filter-wrap">
+          <input
+            ref={filterRef}
+            className="input filter"
+            placeholder="필터 (WHERE 절, 예: status = 'A' AND id > 100)"
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value);
+              updateSuggest(e.target.value, e.target.selectionStart ?? e.target.value.length);
+            }}
+            onKeyDown={(e) => {
+              if (suggest.length) {
+                // 제안이 떠 있는 동안에는 방향키·Enter·Tab 이 제안을 다룬다.
+                if (e.key === 'ArrowDown') { e.preventDefault(); setSuggestIdx((i) => (i + 1) % suggest.length); return; }
+                if (e.key === 'ArrowUp') { e.preventDefault(); setSuggestIdx((i) => (i - 1 + suggest.length) % suggest.length); return; }
+                if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickSuggest(suggest[suggestIdx]); return; }
+                if (e.key === 'Escape') { e.preventDefault(); setSuggest([]); return; }
+              }
+              if (e.key === 'Enter') applyFilter();
+            }}
+            onBlur={() => window.setTimeout(() => setSuggest([]), 150)}
+          />
+          {suggest.length > 0 && (
+            <ul className="filter-suggest" role="listbox">
+              {suggest.map((name, i) => {
+                const col = columns.find((c) => c.name === name);
+                return (
+                  <li
+                    key={name}
+                    role="option"
+                    aria-selected={i === suggestIdx}
+                    className={i === suggestIdx ? 'active' : ''}
+                    onMouseDown={(e) => { e.preventDefault(); pickSuggest(name); }}
+                    onMouseEnter={() => setSuggestIdx(i)}
+                  >
+                    <span className="mono">{name}</span>
+                    <span className="suggest-type">{col?.dataType ?? ''}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
         <button className="btn small" onClick={applyFilter}>적용</button>
         {appliedFilter && (
           <button className="btn small" onClick={() => { setFilter(''); setAppliedFilter(''); setOffset(0); }}>해제</button>

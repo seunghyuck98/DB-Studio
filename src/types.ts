@@ -79,6 +79,21 @@ export interface TableMeta {
   updatedAt: string | null;
 }
 
+/** 테이블 권한 한 줄 */
+export interface TableGrant {
+  grantee: string;
+  /** 테이블에 직접 준 것인지, 스키마(DB) 전체에 준 것인지 */
+  scope: 'table' | 'schema';
+  privilege: string;
+  grantable: boolean;
+}
+
+export interface TablePrivileges {
+  /** 소유자 (PostgreSQL 만, MySQL 은 null) */
+  owner: string | null;
+  grants: TableGrant[];
+}
+
 export interface TableColumn {
   position: number;
   name: string;

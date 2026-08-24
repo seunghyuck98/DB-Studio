@@ -433,6 +433,7 @@ function metaOn(s, action, args) {
     case 'references': return d.listReferences(args.schema, args.table);
     case 'indexes': return d.listIndexes(args.schema, args.table);
     case 'ddl': return d.getDDL(args.schema, args.table, args.kind);
+    case 'privileges': return d.listPrivileges(args.schema, args.table);
     default: throw new Error(`알 수 없는 메타데이터 요청: ${action}`);
   }
 }
