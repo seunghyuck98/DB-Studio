@@ -62,6 +62,10 @@ export interface AppState {
   splitOnBlankLine: boolean;
   /** 좌측 트리 영역 너비 (px, 설정 파일에 저장된다) */
   sidebarWidth: number;
+  /** 우측 Claude 대화 사이드바 너비 (px) */
+  chatWidth: number;
+  /** 토큰 사용량 % 표시의 기준 한도 */
+  usageLimits: { fiveHour: number; weekFable: number; weekAll: number };
   dialog:
     | { kind: 'connection'; connection: ConnectionConfig | null }
     | { kind: 'password'; connection: ConnectionConfig }
@@ -92,6 +96,8 @@ const initialState: AppState = {
   chatOpen: false,
   splitOnBlankLine: false,
   sidebarWidth: 280,
+  chatWidth: 380,
+  usageLimits: { fiveHour: 50_000_000, weekFable: 1_000_000_000, weekAll: 3_000_000_000 },
   dialog: null,
 };
 

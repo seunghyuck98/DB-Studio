@@ -10,6 +10,13 @@ const DEFAULTS = {
   splitOnBlankLine: false,
   /** 좌측 트리 영역 너비 (px) */
   sidebarWidth: 280,
+  /** 우측 Claude 대화 사이드바 너비 (px) */
+  chatWidth: 380,
+  /**
+   * 토큰 사용량 % 표시의 기준 한도. Anthropic 이 실제 한도를 공개하지 않으므로
+   * 사용자가 조절하는 기준값이다 (기본은 넉넉한 어림값).
+   */
+  usageLimits: { fiveHour: 50_000_000, weekFable: 1_000_000_000, weekAll: 3_000_000_000 },
 };
 
 let cache = null;
@@ -27,6 +34,8 @@ function get() {
     for (const key of Object.keys(DEFAULTS)) {
       if (key in parsed) cache[key] = parsed[key];
     }
+    // 중첩 기본값 보강 (예전 설정 파일에 usageLimits 일부만 있어도 채운다)
+    cache.usageLimits = { ...DEFAULTS.usageLimits, ...(cache.usageLimits || {}) };
   } catch (_) {
     cache = { ...DEFAULTS };
   }
@@ -36,7 +45,14 @@ function get() {
 function set(patch) {
   const next = { ...get() };
   for (const key of Object.keys(DEFAULTS)) {
-    if (patch && key in patch) next[key] = patch[key];
+    if (patch && key in patch) {
+      // usageLimits 같은 중첩 객체는 통째로 덮지 않고 병합한다.
+      if (key === 'usageLimits' && patch[key] && typeof patch[key] === 'object') {
+        next[key] = { ...DEFAULTS.usageLimits, ...next[key], ...patch[key] };
+      } else {
+        next[key] = patch[key];
+      }
+    }
   }
   cache = next;
   try {

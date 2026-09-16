@@ -339,6 +339,19 @@ export type AgentEvent =
   | { type: 'error'; message: string }
   | { type: 'done' };
 
+export interface UsageLimits {
+  fiveHour: number;
+  weekFable: number;
+  weekAll: number;
+}
+
+export interface AppSettings {
+  splitOnBlankLine: boolean;
+  sidebarWidth: number;
+  chatWidth: number;
+  usageLimits: UsageLimits;
+}
+
 export interface UsageSummary {
   updatedAt: number;
   files: number;
@@ -430,8 +443,8 @@ declare global {
         stop(runId: string): void;
       };
       settings: {
-        get(): Promise<{ splitOnBlankLine: boolean; sidebarWidth: number }>;
-        set(patch: Partial<{ splitOnBlankLine: boolean; sidebarWidth: number }>): Promise<{ splitOnBlankLine: boolean; sidebarWidth: number }>;
+        get(): Promise<AppSettings>;
+        set(patch: Partial<AppSettings>): Promise<AppSettings>;
       };
       workspace: {
         load(): Promise<SavedWorkspace>;

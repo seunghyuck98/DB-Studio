@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useAppState } from '../state/store';
+import { setChatWidth, persistChatWidth } from '../state/actions';
 
 interface ToolCall { name: string; input: string }
 
@@ -17,6 +19,8 @@ let runSeq = 0;
  * (electron/agent.js 가 실제 에이전트 루프를 돌린다.)
  */
 export default function ChatSidebar({ onClose }: { onClose: () => void }) {
+  const { chatWidth } = useAppState();
+  const [dragging, setDragging] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
@@ -88,6 +92,21 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
     if (runIdRef.current) window.api?.agent?.stop(runIdRef.current);
   };
 
+  // 사이드바는 화면 오른쪽 끝에 붙어 있으므로 폭 = (창 너비 - 마우스 X).
+  const startResize = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    const move = (ev: MouseEvent) => setChatWidth(window.innerWidth - ev.clientX);
+    const up = () => {
+      setDragging(false);
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      void persistChatWidth();
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
   const reset = () => {
     stop();
     sessionRef.current = undefined;
@@ -95,7 +114,12 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <aside className="chat-sidebar">
+    <aside className="chat-sidebar" style={{ flexBasis: chatWidth, width: chatWidth }}>
+      <div
+        className={`chat-splitter ${dragging ? 'dragging' : ''}`}
+        title="끌어서 폭 조절"
+        onMouseDown={startResize}
+      />
       <div className="chat-head">
         <b>Claude · DB 도우미</b>
         {ready && !ready.hasEmrDb && <span className="chat-warn" title="emr-db MCP 설정을 찾지 못했습니다">DB 미연결</span>}

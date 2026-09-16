@@ -25,6 +25,8 @@ export async function loadSettings(): Promise<void> {
     setState({
       splitOnBlankLine: !!s.splitOnBlankLine,
       sidebarWidth: clampSidebar(s.sidebarWidth),
+      chatWidth: clampChat(s.chatWidth),
+      usageLimits: sanitizeLimits(s.usageLimits),
     });
   } catch (e) {
     notify('error', message(e));
@@ -49,6 +51,43 @@ export async function persistSidebarWidth(): Promise<void> {
   } catch (_) {
     /* 저장 실패는 다음 드래그 때 다시 시도된다 */
   }
+}
+
+function clampChat(w: unknown): number {
+  const n = Number(w);
+  if (!Number.isFinite(n)) return 380;
+  return Math.min(760, Math.max(280, Math.round(n)));
+}
+
+function sanitizeLimits(v: unknown): { fiveHour: number; weekFable: number; weekAll: number } {
+  const d = { fiveHour: 50_000_000, weekFable: 1_000_000_000, weekAll: 3_000_000_000 };
+  if (!v || typeof v !== 'object') return d;
+  const o = v as Record<string, unknown>;
+  const pick = (k: keyof typeof d) => {
+    const n = Number(o[k]);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : d[k];
+  };
+  return { fiveHour: pick('fiveHour'), weekFable: pick('weekFable'), weekAll: pick('weekAll') };
+}
+
+/** 대화 사이드바 폭 (드래그 중). 저장은 놓을 때 한 번만. */
+export function setChatWidth(px: number): void {
+  setState({ chatWidth: clampChat(px) });
+}
+
+export async function persistChatWidth(): Promise<void> {
+  try {
+    await api().settings.set({ chatWidth: getState().chatWidth });
+  } catch (_) { /* 다음에 다시 */ }
+}
+
+/** 사용량 % 기준 한도를 바꾸고 저장한다. */
+export async function setUsageLimits(limits: { fiveHour: number; weekFable: number; weekAll: number }): Promise<void> {
+  const clean = sanitizeLimits(limits);
+  setState({ usageLimits: clean });
+  try {
+    await api().settings.set({ usageLimits: clean });
+  } catch (_) { /* 저장 실패해도 이번 실행엔 적용 */ }
 }
 
 /** 문장 구분 방식을 바꾸고 설정 파일에도 남긴다. */
