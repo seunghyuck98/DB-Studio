@@ -173,6 +173,13 @@ export default function Toolbar({ connectionId }: Props) {
       <div className="toolbar-spacer" />
 
       <div className="toolbar-group">
+        <button
+          className={`btn ${state.chatOpen ? 'primary' : ''}`}
+          title="Claude DB 도우미"
+          onClick={() => setState((prev) => ({ chatOpen: !prev.chatOpen }))}
+        >
+          Claude
+        </button>
         <UsageBadge />
         <button
           className="btn"

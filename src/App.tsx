@@ -9,6 +9,7 @@ import HistoryTab, { openHistoryTab } from './components/HistoryTab';
 import TxTab from './components/TxTab';
 import SchemaListTab from './components/SchemaListTab';
 import SqlEditorList from './components/SqlEditorList';
+import ChatSidebar from './components/ChatSidebar';
 import StatusBar from './components/StatusBar';
 import ConnectionDialog from './components/ConnectionDialog';
 import PasswordDialog from './components/PasswordDialog';
@@ -92,6 +93,7 @@ export default function App() {
             </div>
           )}
         </main>
+        {state.chatOpen && <ChatSidebar onClose={() => setState({ chatOpen: false })} />}
       </div>
       <StatusBar connectionId={connId} />
       {state.sqlListOpen && <SqlEditorList />}

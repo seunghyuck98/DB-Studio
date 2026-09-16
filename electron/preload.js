@@ -62,6 +62,17 @@ contextBridge.exposeInMainWorld('api', {
     /** Claude 토큰 사용량 요약 (로컬 대화 기록 기반) */
     summary: () => call('usage:summary'),
   },
+  agent: {
+    status: () => call('agent:status'),
+    /** 한 발화를 보내고, 스트리밍 이벤트를 onEvent 로 받는다. 정리 함수를 돌려준다. */
+    ask: (req, onEvent) => {
+      const fn = (_e, runId, ev) => { if (runId === req.runId) onEvent(ev); };
+      ipcRenderer.on('agent:event', fn);
+      ipcRenderer.send('agent:ask', req);
+      return () => ipcRenderer.removeListener('agent:event', fn);
+    },
+    stop: (runId) => ipcRenderer.send('agent:stop', runId),
+  },
   settings: {
     get: () => call('settings:get'),
     set: (patch) => call('settings:set', patch),

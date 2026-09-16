@@ -21,6 +21,7 @@ const history = require('./history');
 const settings = require('./settings');
 const workspace = require('./workspace');
 const usage = require('./usage');
+const agent = require('./agent');
 
 let mainWindow = null;
 
@@ -189,6 +190,14 @@ handle('export:query', async (id, req) => {
 });
 
 handle('usage:summary', () => usage.summary());
+
+handle('agent:status', () => agent.status());
+// 스트리밍이라 handle 대신 이벤트로 응답을 흘려보낸다.
+ipcMain.on('agent:ask', (event, req) => {
+  const send = (ev) => { if (!event.sender.isDestroyed()) event.sender.send('agent:event', req.runId, ev); };
+  agent.ask(req, send).catch((e) => send({ type: 'error', message: e && e.message ? e.message : String(e) }));
+});
+ipcMain.on('agent:stop', (_event, runId) => { agent.stop(runId); });
 
 handle('settings:get', () => settings.get());
 handle('settings:set', (patch) => settings.set(patch));

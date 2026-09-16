@@ -331,6 +331,14 @@ export interface UsageTotals {
   total: number;
 }
 
+export type AgentEvent =
+  | { type: 'session'; sessionId: string }
+  | { type: 'delta'; text: string }
+  | { type: 'tool'; name: string; input: string }
+  | { type: 'result'; text: string; isError: boolean; subtype: string; usage: unknown }
+  | { type: 'error'; message: string }
+  | { type: 'done' };
+
 export interface UsageSummary {
   updatedAt: number;
   files: number;
@@ -415,6 +423,11 @@ declare global {
       };
       usage: {
         summary(): Promise<UsageSummary>;
+      };
+      agent: {
+        status(): Promise<{ hasEmrDb: boolean; claudeBin: string }>;
+        ask(req: { runId: string; prompt: string; resume?: string; apiKey?: string }, onEvent: (ev: AgentEvent) => void): () => void;
+        stop(runId: string): void;
       };
       settings: {
         get(): Promise<{ splitOnBlankLine: boolean; sidebarWidth: number }>;

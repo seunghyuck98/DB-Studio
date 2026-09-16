@@ -56,6 +56,8 @@ export interface AppState {
   toast: Toast | null;
   /** SQL 편집기 목록 패널 표시 여부 */
   sqlListOpen: boolean;
+  /** 우측 Claude 대화 사이드바 표시 여부 */
+  chatOpen: boolean;
   /** 빈 줄도 문장 구분자로 볼지 (설정 파일에 저장된다) */
   splitOnBlankLine: boolean;
   /** 좌측 트리 영역 너비 (px, 설정 파일에 저장된다) */
@@ -87,6 +89,7 @@ const initialState: AppState = {
   },
   toast: null,
   sqlListOpen: false,
+  chatOpen: false,
   splitOnBlankLine: false,
   sidebarWidth: 280,
   dialog: null,
