@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type {
-  ConnectionConfig, SessionStatus, Tab, TableTab, SqlTab, HistoryTab, TxTab,
+  ConnectionConfig, SessionStatus, Tab, TableTab, SqlTab, HistoryTab, TxTab, SchemaTab,
   SearchScopes, SearchResult, SavedSqlEditor,
 } from '../types';
 
@@ -58,6 +58,8 @@ export interface AppState {
   sqlListOpen: boolean;
   /** 빈 줄도 문장 구분자로 볼지 (설정 파일에 저장된다) */
   splitOnBlankLine: boolean;
+  /** 좌측 트리 영역 너비 (px, 설정 파일에 저장된다) */
+  sidebarWidth: number;
   dialog:
     | { kind: 'connection'; connection: ConnectionConfig | null }
     | { kind: 'password'; connection: ConnectionConfig }
@@ -86,6 +88,7 @@ const initialState: AppState = {
   toast: null,
   sqlListOpen: false,
   splitOnBlankLine: false,
+  sidebarWidth: 280,
   dialog: null,
 };
 
@@ -233,6 +236,18 @@ export function openTableTab(tab: Omit<TableTab, 'id' | 'kind' | 'activeSection'
     return;
   }
   pushTab({ id, kind: 'table', activeSection: tab.activeSection ?? 'data', ...tab });
+}
+
+/** 스키마(또는 MySQL 데이터베이스)의 테이블 목록 탭을 연다. 이미 있으면 그 탭으로 간다. */
+export function openSchemaTab(connectionId: string, database: string, schema: string): void {
+  const id = `schemalist:${connectionId}:${database}:${schema}`;
+  const found = state.tabs.find((t) => t.id === id);
+  if (found) {
+    setState(() => activatePatch(found));
+    return;
+  }
+  const tab: SchemaTab = { id, kind: 'schema', connectionId, database, schema, title: schema };
+  pushTab(tab);
 }
 
 let sqlSeq = 0;

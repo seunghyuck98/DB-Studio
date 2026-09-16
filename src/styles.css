@@ -143,11 +143,12 @@ body {
 /* ---- 사이드바 / 트리 ------------------------------------------------------- */
 
 .sidebar {
-  width: 280px; min-width: 180px; max-width: 520px;
+  width: 280px;
+  flex: 0 0 auto;
   display: flex; flex-direction: column;
   background: var(--bg-sunken);
   border-right: 1px solid var(--border);
-  resize: horizontal; overflow: hidden;
+  overflow: hidden;
 }
 .sidebar-head { display: flex; align-items: center; gap: 4px; padding: 6px; border-bottom: 1px solid var(--border-soft); }
 .sidebar-head .search { flex: 1; }
@@ -936,3 +937,20 @@ body {
 .filter-suggest li.active { background: var(--accent); color: #fff; }
 .filter-suggest li.active .suggest-type { color: rgba(255, 255, 255, 0.75); }
 .suggest-type { color: var(--text-faint); font-size: 11px; }
+
+/* ---- 트리/컨텐츠 폭 조절 스플리터 ---- */
+.side-splitter {
+  flex: 0 0 5px;
+  margin-left: -3px; /* 트리의 오른쪽 테두리 위에 겹친다 */
+  cursor: col-resize;
+  z-index: 5;
+}
+.side-splitter:hover, .side-splitter.dragging { background: var(--accent); opacity: 0.55; }
+
+/* ---- 스키마 테이블 목록 탭 ---- */
+.schema-list { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.schema-list .grid-scroll { flex: 1; min-height: 0; overflow: auto; }
+.schema-list .meta-table th { cursor: pointer; user-select: none; white-space: nowrap; }
+.schema-list .meta-table.hoverable tbody tr { cursor: default; }
+.schema-list .meta-table.hoverable tbody tr:hover { background: #2f3237; }
+.schema-list .cell-comment { color: var(--text-dim); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

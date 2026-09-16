@@ -254,7 +254,7 @@ export interface ColumnChangeSpec {
   tableComment?: string | null;
 }
 
-export type TabKind = 'table' | 'sql' | 'history' | 'tx';
+export type TabKind = 'table' | 'sql' | 'history' | 'tx' | 'schema';
 
 export interface TableTab {
   id: string;
@@ -303,7 +303,19 @@ export interface TxTab {
   title: string;
 }
 
-export type Tab = TableTab | SqlTab | HistoryTab | TxTab;
+/** 스키마(또는 MySQL 데이터베이스)의 테이블 목록 탭 */
+export interface SchemaTab {
+  id: string;
+  /** 화면 분할에서 어느 쪽에 있는지 (없으면 왼쪽 0) */
+  pane?: 0 | 1;
+  kind: 'schema';
+  connectionId: string;
+  database: string;
+  schema: string;
+  title: string;
+}
+
+export type Tab = TableTab | SqlTab | HistoryTab | TxTab | SchemaTab;
 
 /** 다음 실행까지 남기는 SQL 편집기 하나. 결과는 저장하지 않는다. */
 export interface SavedSqlEditor {
@@ -375,8 +387,8 @@ declare global {
         }): Promise<ExportResult>;
       };
       settings: {
-        get(): Promise<{ splitOnBlankLine: boolean }>;
-        set(patch: Partial<{ splitOnBlankLine: boolean }>): Promise<{ splitOnBlankLine: boolean }>;
+        get(): Promise<{ splitOnBlankLine: boolean; sidebarWidth: number }>;
+        set(patch: Partial<{ splitOnBlankLine: boolean; sidebarWidth: number }>): Promise<{ splitOnBlankLine: boolean; sidebarWidth: number }>;
       };
       workspace: {
         load(): Promise<SavedWorkspace>;

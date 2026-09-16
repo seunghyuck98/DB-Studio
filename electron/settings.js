@@ -8,6 +8,8 @@ const { app } = require('electron');
 const DEFAULTS = {
   /** 빈 줄도 문장 구분자로 볼지 */
   splitOnBlankLine: false,
+  /** 좌측 트리 영역 너비 (px) */
+  sidebarWidth: 280,
 };
 
 let cache = null;

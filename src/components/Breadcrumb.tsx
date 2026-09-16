@@ -31,6 +31,9 @@ export default function Breadcrumb({ tab }: { tab: Tab | null }) {
   if (hasSchemaLevel && tab.schema) parts.push({ label: tab.schema, kind: 'schema' });
   if (tab.kind === 'table') {
     parts.push({ label: tab.table, kind: tab.objectKind });
+  } else if (tab.kind === 'schema') {
+    // 스키마 목록 탭은 위 조각(…› 스키마)까지가 위치 그 자체라 더 붙일 것이 없다.
+    // (MySQL 은 데이터베이스 조각이 곧 스키마다)
   } else {
     parts.push({ label: tab.title, kind: 'sql' });
   }

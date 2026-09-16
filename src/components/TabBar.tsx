@@ -6,9 +6,9 @@ import {
 } from '../state/store';
 import type { Tab } from '../types';
 
-const TAB_ICON: Record<Tab['kind'], string> = { table: 'table', sql: 'sql', history: 'history', tx: 'tx' };
+const TAB_ICON: Record<Tab['kind'], string> = { table: 'table', sql: 'sql', history: 'history', tx: 'tx', schema: 'schema' };
 
-const TAB_SUB: Partial<Record<Tab['kind'], string>> = { history: '전체', tx: '트랜잭션' };
+const TAB_SUB: Partial<Record<Tab['kind'], string>> = { history: '전체', tx: '트랜잭션', schema: '테이블 목록' };
 
 /**
  * 드래그 중인 탭. dataTransfer 는 drop 전에 내용을 읽을 수 없어서

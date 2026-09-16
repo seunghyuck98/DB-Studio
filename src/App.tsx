@@ -1,4 +1,4 @@
-import { useEffect, useState, type DragEvent } from 'react';
+import { useEffect, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import Toolbar from './components/Toolbar';
 import Sidebar from './components/Sidebar';
 import TabBar, { draggedTabId } from './components/TabBar';
@@ -7,6 +7,7 @@ import TableEditor from './components/TableEditor';
 import SqlEditor from './components/SqlEditor';
 import HistoryTab, { openHistoryTab } from './components/HistoryTab';
 import TxTab from './components/TxTab';
+import SchemaListTab from './components/SchemaListTab';
 import SqlEditorList from './components/SqlEditorList';
 import StatusBar from './components/StatusBar';
 import ConnectionDialog from './components/ConnectionDialog';
@@ -17,7 +18,10 @@ import {
   useAppState, activeTab, activeConnectionId, setState, openSqlTab,
   paneTabs, paneActiveId, isSplit, setFocusedPane, moveTab, type AppState,
 } from './state/store';
-import { loadConnections, loadSettings, commit, rollback, setAutoCommit } from './state/actions';
+import {
+  loadConnections, loadSettings, commit, rollback, setAutoCommit,
+  setSidebarWidth, persistSidebarWidth,
+} from './state/actions';
 import { restoreWorkspace } from './state/workspace';
 
 export default function App() {
@@ -77,6 +81,7 @@ export default function App() {
       <Toolbar connectionId={connId} />
       <div className="app-body">
         <Sidebar />
+        <SideSplitter />
         <main className="workspace">
           {state.tabs.length === 0 ? (
             <div className="editor-host"><EmptyState /></div>
@@ -167,9 +172,43 @@ function EditorPane({ pane, state }: { pane: 0 | 1; state: AppState }) {
         {active?.kind === 'sql' && <SqlEditor key={active.id} tab={active} />}
         {active?.kind === 'history' && <HistoryTab key={active.id} tab={active} />}
         {active?.kind === 'tx' && <TxTab key={active.id} tab={active} />}
+        {active?.kind === 'schema' && <SchemaListTab key={active.id} tab={active} />}
         {dropHint && <div className={`split-hint ${dropHint}`} />}
       </div>
     </section>
+  );
+}
+
+/**
+ * 트리와 컨텐츠 사이의 세로 스플리터.
+ * 끌어서 트리 폭을 바꾸고, 놓으면 설정 파일에 남겨 다음 실행에도 유지된다.
+ */
+function SideSplitter() {
+  const [dragging, setDragging] = useState(false);
+
+  const start = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    const move = (ev: MouseEvent) => {
+      // 스플리터의 x 좌표가 곧 트리 폭이다 (트리가 화면 왼쪽 끝에 붙어 있다).
+      setSidebarWidth(ev.clientX);
+    };
+    const up = () => {
+      setDragging(false);
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      void persistSidebarWidth();
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
+  return (
+    <div
+      className={`side-splitter ${dragging ? 'dragging' : ''}`}
+      title="끌어서 트리 폭 조절"
+      onMouseDown={start}
+    />
   );
 }
 

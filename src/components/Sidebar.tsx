@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import SearchResults from './SearchResults';
 import ContextMenu, { type MenuState } from './ContextMenu';
 import {
-  useAppState, setState, setSearch, clearSearchResult, openTableTab, openSqlTab,
+  useAppState, setState, setSearch, clearSearchResult, openTableTab, openSchemaTab, openSqlTab,
   activeConnectionId, sessionOf,
   type TreeItem, type AppState,
 } from '../state/store';
@@ -62,7 +62,7 @@ export default function Sidebar() {
   const narrowed = !allSchemas || SCOPE_LABELS.some((s) => !scopes[s.key]);
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={{ width: state.sidebarWidth }}>
       <div className="sidebar-head">
         <input
           className="input search"
@@ -268,7 +268,17 @@ function ItemRow({ item, state, filter, onMenu, depth }: RowProps & { item: Tree
   const leaf = isLeaf(item);
 
   const open = () => {
-    if (!leaf) { void toggleNode(item); return; }
+    if (!leaf) {
+      // 스키마(MySQL 은 데이터베이스가 곧 스키마)는 우측에 테이블 목록을 함께 연다.
+      const session = state.sessions[item.connectionId];
+      if (item.type === 'schema') {
+        openSchemaTab(item.connectionId, item.database!, item.schema!);
+      } else if (item.type === 'database' && session && !session.hasSchemaLevel) {
+        openSchemaTab(item.connectionId, item.database!, item.database!);
+      }
+      if (!expanded) void toggleNode(item);
+      return;
+    }
     openTableTab({
       connectionId: item.connectionId,
       database: item.database!,
@@ -295,6 +305,13 @@ function ItemRow({ item, state, filter, onMenu, depth }: RowProps & { item: Tree
     } else {
       items.push({ label: '새로 고침', action: () => void refreshNode(item) });
       if (item.type === 'schema' || item.type === 'database') {
+        const session = state.sessions[item.connectionId];
+        if (item.type === 'schema' || (session && !session.hasSchemaLevel)) {
+          items.push({
+            label: '테이블 목록 열기',
+            action: () => openSchemaTab(item.connectionId, item.database!, item.schema ?? item.database!),
+          });
+        }
         items.push({
           label: 'SQL 편집기 열기',
           action: () => openSqlTab(item.connectionId, item.database!, item.schema ?? item.database!),

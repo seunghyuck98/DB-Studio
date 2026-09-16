@@ -22,9 +22,32 @@ export const nodeId = {
 export async function loadSettings(): Promise<void> {
   try {
     const s = await api().settings.get();
-    setState({ splitOnBlankLine: !!s.splitOnBlankLine });
+    setState({
+      splitOnBlankLine: !!s.splitOnBlankLine,
+      sidebarWidth: clampSidebar(s.sidebarWidth),
+    });
   } catch (e) {
     notify('error', message(e));
+  }
+}
+
+function clampSidebar(w: unknown): number {
+  const n = Number(w);
+  if (!Number.isFinite(n)) return 280;
+  return Math.min(560, Math.max(180, Math.round(n)));
+}
+
+/** 드래그 중 트리 폭을 바꾼다 (저장은 놓을 때 한 번만). */
+export function setSidebarWidth(px: number): void {
+  setState({ sidebarWidth: clampSidebar(px) });
+}
+
+/** 드래그를 놓았을 때 현재 폭을 설정 파일에 남긴다. */
+export async function persistSidebarWidth(): Promise<void> {
+  try {
+    await api().settings.set({ sidebarWidth: getState().sidebarWidth });
+  } catch (_) {
+    /* 저장 실패는 다음 드래그 때 다시 시도된다 */
   }
 }
 
