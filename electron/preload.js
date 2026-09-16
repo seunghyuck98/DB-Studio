@@ -58,6 +58,10 @@ contextBridge.exposeInMainWorld('api', {
     /** 페이지 제한 없이 다시 조회해서 저장한다. */
     query: (id, req) => call('export:query', id, req),
   },
+  usage: {
+    /** Claude 토큰 사용량 요약 (로컬 대화 기록 기반) */
+    summary: () => call('usage:summary'),
+  },
   settings: {
     get: () => call('settings:get'),
     set: (patch) => call('settings:set', patch),

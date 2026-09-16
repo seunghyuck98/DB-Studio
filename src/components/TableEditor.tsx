@@ -1,4 +1,5 @@
 import PropertiesTab from './PropertiesTab';
+import TableInfoHeader from './TableInfoHeader';
 import DataTab from './DataTab';
 import ERDiagram from './ERDiagram';
 import { updateTab } from '../state/store';
@@ -25,6 +26,7 @@ export default function TableEditor({ tab }: { tab: TableTab }) {
             {s.label}
           </button>
         ))}
+        <TableInfoHeader key={tab.id} tab={tab} />
       </div>
       <div className="section-body">
         {tab.activeSection === 'properties' && <PropertiesTab tab={tab} />}

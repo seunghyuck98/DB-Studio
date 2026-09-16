@@ -323,6 +323,25 @@ export interface SchemaTab {
 
 export type Tab = TableTab | SqlTab | HistoryTab | TxTab | SchemaTab;
 
+export interface UsageTotals {
+  input: number;
+  output: number;
+  cacheCreate: number;
+  cacheRead: number;
+  total: number;
+}
+
+export interface UsageSummary {
+  updatedAt: number;
+  files: number;
+  /** 최근 5시간 */
+  fiveHour: UsageTotals;
+  /** 최근 7일, Fable 모델만 */
+  weekFable: UsageTotals;
+  /** 최근 7일, 전체 모델 */
+  weekAll: UsageTotals;
+}
+
 /** 다음 실행까지 남기는 SQL 편집기 하나. 결과는 저장하지 않는다. */
 export interface SavedSqlEditor {
   id: string;
@@ -393,6 +412,9 @@ declare global {
           format: ExportFormat; defaultName: string;
           options?: { delimiter?: string; header?: boolean; nullText?: string; bom?: boolean };
         }): Promise<ExportResult>;
+      };
+      usage: {
+        summary(): Promise<UsageSummary>;
       };
       settings: {
         get(): Promise<{ splitOnBlankLine: boolean; sidebarWidth: number }>;

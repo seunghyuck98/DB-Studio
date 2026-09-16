@@ -21,19 +21,6 @@ const SECTIONS: { key: Section; label: string }[] = [
   { key: 'ddl', label: 'DDL' },
 ];
 
-function fmtBytes(n: number): string {
-  if (!n) return '0';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
-
-function fmtDate(v: string | null): string {
-  if (!v) return '';
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
-}
 
 /**
  * react-codemirror 는 basicSetup/extensions 의 identity 가 바뀌면 에디터를 전부
@@ -142,7 +129,6 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
 
   return (
     <div className="props">
-      {data?.info && <TableInfoBar tab={tab} info={data.info} owner={data.privileges.owner} />}
       <div className="props-tabs">
         {SECTIONS.map((s) => (
           <button
@@ -336,7 +322,7 @@ function ColumnsPanel({ tab, rows, allRows, onChanged }: {
           </thead>
           <tbody>
             {!editing && rows.map((c) => (
-              <tr key={c.name}>
+              <tr key={c.name} className={c.primaryKey ? 'pk-row' : ''}>
                 <td className="num">{c.position}</td>
                 <td className="mono strong">{c.name}</td>
                 <td className="mono">{c.dataType}</td>
@@ -348,7 +334,10 @@ function ColumnsPanel({ tab, rows, allRows, onChanged }: {
               </tr>
             ))}
             {editing && drafts.map((d, i) => (
-              <tr key={d.key} className={d.dropped ? 'deleted' : (!d.original ? 'inserted' : '')}>
+              <tr
+                key={d.key}
+                className={`${d.dropped ? 'deleted' : (!d.original ? 'inserted' : '')} ${allRows.find((c) => c.name === d.original?.name)?.primaryKey ? 'pk-row' : ''}`}
+              >
                 <td className="num">{i + 1}</td>
                 <td><input className="input cell" value={d.name} disabled={d.dropped} onChange={(e) => patch(d.key, { name: e.target.value })} /></td>
                 <td><input className="input cell" value={d.dataType} disabled={d.dropped} onChange={(e) => patch(d.key, { dataType: e.target.value })} /></td>
@@ -458,39 +447,6 @@ function DdlPanel({ tab, ddl, onChanged }: { tab: TableTab; ddl: string; onChang
           onApplied={onChanged}
         />
       )}
-    </div>
-  );
-}
-
-// ---- 테이블 정보 ----------------------------------------------------------------
-
-/** 섹션 칩 위에 항상 보이는 테이블 요약 정보. */
-function TableInfoBar({ tab, info, owner }: { tab: TableTab; info: TableMeta; owner: string | null }) {
-  const items: { label: string; value: string }[] = [];
-  items.push({ label: '종류', value: info.kind === 'view' ? '뷰' : '테이블' });
-  if (owner) items.push({ label: '소유자', value: owner });
-  if (info.engine) items.push({ label: '엔진', value: info.engine });
-  if (info.rowsEstimate != null) items.push({ label: '행 (추정)', value: info.rowsEstimate.toLocaleString() });
-  if (info.sizeBytes) items.push({ label: '크기', value: fmtBytes(info.sizeBytes) });
-  if (info.collation) items.push({ label: '정렬 규칙', value: info.collation });
-  if (info.createdAt) items.push({ label: '생성', value: fmtDate(info.createdAt) });
-  if (info.updatedAt) items.push({ label: '변경', value: fmtDate(info.updatedAt) });
-
-  return (
-    <div className="props-info">
-      <div className="props-info-title">
-        <span className={`icon icon-${info.kind === 'view' ? 'view' : 'table'}`} aria-hidden />
-        <b className="mono">{tab.schema}.{tab.table}</b>
-        {info.comment && <span className="props-info-comment" title={info.comment}>{info.comment}</span>}
-      </div>
-      <div className="props-info-items">
-        {items.map((it) => (
-          <span key={it.label} className="props-info-item">
-            <span className="props-info-label">{it.label}</span>
-            <span className="mono">{it.value}</span>
-          </span>
-        ))}
-      </div>
     </div>
   );
 }

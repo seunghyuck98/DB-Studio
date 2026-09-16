@@ -20,6 +20,7 @@ const exporter = require('./export');
 const history = require('./history');
 const settings = require('./settings');
 const workspace = require('./workspace');
+const usage = require('./usage');
 
 let mainWindow = null;
 
@@ -186,6 +187,8 @@ handle('export:query', async (id, req) => {
   const result = await exporter.exportRows({ ...req, columns: data.columns, rows: data.rows });
   return { ...result, truncated: data.truncated };
 });
+
+handle('usage:summary', () => usage.summary());
 
 handle('settings:get', () => settings.get());
 handle('settings:set', (patch) => settings.set(patch));
