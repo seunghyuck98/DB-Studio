@@ -40,6 +40,9 @@ function listTranscripts() {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) { walk(p, depth + 1); continue; }
       if (!e.name.endsWith('.jsonl')) continue;
+      // 앱 내 Claude 대화는 아래 recordAgentUsage 로 직접 집계하므로,
+      // 그 전용 cwd 폴더의 CLI 기록은 세지 않는다 (이중집계 방지).
+      if (dir.includes('dbstudio-agent-sessions')) continue;
       let st;
       try { st = fs.statSync(p); } catch (_) { continue; }
       if (st.mtimeMs < cutoff) continue;
@@ -137,9 +140,58 @@ function sum(t) {
 }
 
 /**
+ * 가중 토큰. rate limit 은 캐시 읽기를 훨씬 낮게 친다(가격도 입력의 0.1배).
+ * 캐시 읽기를 1:1 로 세면 총합이 캐시 읽기에 지배되어 실제 사용률과 크게 어긋난다.
+ * % 표시는 이 가중값을 기준으로 한다.
+ */
+function weighted(t) {
+  return Math.round(t.input + t.output + t.cacheCreate + t.cacheRead * 0.1);
+}
+
+/**
  * 요약: 최근 5시간 / 최근 7일(Fable) / 최근 7일(전체).
  * 시간 버킷 단위라 창 경계는 1시간 오차가 있을 수 있다 — 한도 감시 용도로는 충분하다.
  */
+const AGENT_LOG = path.join(os.homedir(), '.dbstudio', 'agent-usage.jsonl');
+
+/**
+ * 앱 내 Claude 대화가 쓴 토큰을 직접 기록한다 (delta, 이미 세션 누적을 뺀 값).
+ * 패키지 앱에서 CLI 기록 위치가 달라져도 확실히 집계되도록 별도 로그에 남긴다.
+ */
+function recordAgentUsage(model, delta) {
+  if (!delta) return;
+  const rec = {
+    ts: new Date().toISOString(),
+    model: String(model || ''),
+    input: delta.input || 0,
+    output: delta.output || 0,
+    cacheCreate: delta.cacheCreate || 0,
+    cacheRead: delta.cacheRead || 0,
+  };
+  if (rec.input + rec.output + rec.cacheCreate + rec.cacheRead <= 0) return;
+  try {
+    fs.mkdirSync(path.dirname(AGENT_LOG), { recursive: true });
+    fs.appendFileSync(AGENT_LOG, JSON.stringify(rec) + '\n', 'utf8');
+  } catch (_) { /* 기록 실패는 대화를 막지 않는다 */ }
+}
+
+/** 에이전트 로그를 창별 합계에 더한다. */
+function foldAgentLog(now, fiveHour, weekFable, weekAll) {
+  let text;
+  try { text = fs.readFileSync(AGENT_LOG, 'utf8'); } catch (_) { return; }
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    let r;
+    try { r = JSON.parse(line); } catch (_) { continue; }
+    const ts = Date.parse(r.ts);
+    if (!Number.isFinite(ts) || now - ts > WINDOW_7D_MS) continue;
+    const t = { input: r.input || 0, output: r.output || 0, cacheCreate: r.cacheCreate || 0, cacheRead: r.cacheRead || 0 };
+    mergeTotals(weekAll, t);
+    if (String(r.model).toLowerCase().includes('fable')) mergeTotals(weekFable, t);
+    if (now - ts <= WINDOW_5H_MS) mergeTotals(fiveHour, t);
+  }
+}
+
 function summary() {
   const now = Date.now();
   const files = listTranscripts();
@@ -157,6 +209,9 @@ function summary() {
     }
   }
 
+  // 앱 내 Claude 대화 사용량을 더한다.
+  foldAgentLog(now, fiveHour, weekFable, weekAll);
+
   // 오래된 파일의 캐시는 버려 메모리를 잡아먹지 않게 한다.
   const live = new Set(files.map((f) => f.path));
   for (const key of fileCache.keys()) {
@@ -166,10 +221,10 @@ function summary() {
   return {
     updatedAt: now,
     files: files.length,
-    fiveHour: { ...fiveHour, total: sum(fiveHour) },
-    weekFable: { ...weekFable, total: sum(weekFable) },
-    weekAll: { ...weekAll, total: sum(weekAll) },
+    fiveHour: { ...fiveHour, total: sum(fiveHour), weighted: weighted(fiveHour) },
+    weekFable: { ...weekFable, total: sum(weekFable), weighted: weighted(weekFable) },
+    weekAll: { ...weekAll, total: sum(weekAll), weighted: weighted(weekAll) },
   };
 }
 
-module.exports = { summary };
+module.exports = { summary, recordAgentUsage };

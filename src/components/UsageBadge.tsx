@@ -11,14 +11,16 @@ function fmt(n: number): string {
   return String(n);
 }
 
-function pct(total: number, limit: number): number {
+function pct(t: UsageTotals, limit: number): number {
   if (!limit || limit <= 0) return 0;
-  return Math.min(999, Math.round((total / limit) * 100));
+  // rate limit 은 캐시 읽기를 낮게 치므로 가중값으로 % 를 낸다.
+  return Math.min(999, Math.round((t.weighted / limit) * 100));
 }
 
 function detail(label: string, t: UsageTotals, limit: number): string {
-  return `${label} — ${pct(t.total, limit)}%\n`
-    + `  합계 ${t.total.toLocaleString()} / 기준 ${limit.toLocaleString()}\n`
+  return `${label} — ${pct(t, limit)}%\n`
+    + `  가중 ${t.weighted.toLocaleString()} / 기준 ${limit.toLocaleString()}\n`
+    + `  (원시 합계 ${t.total.toLocaleString()})\n`
     + `  입력 ${t.input.toLocaleString()} · 출력 ${t.output.toLocaleString()}\n`
     + `  캐시 쓰기 ${t.cacheCreate.toLocaleString()} · 캐시 읽기 ${t.cacheRead.toLocaleString()}`;
 }
@@ -52,7 +54,7 @@ export default function UsageBadge() {
         .catch(() => { if (!cancelled) setError(true); });
     };
     load();
-    timer.current = setInterval(load, 60_000);
+    timer.current = setInterval(load, 180_000); // 3분마다
     window.addEventListener('focus', load);
     return () => {
       cancelled = true;
@@ -82,7 +84,7 @@ export default function UsageBadge() {
     <div className="usage-badge-wrap" ref={boxRef}>
       <button className="usage-badge" title={tip} onClick={() => setEditing((v) => !v)}>
         {CELLS.map((c, i) => {
-          const p = pct(totalsOf(c.key).total, limitOf(c.key));
+          const p = pct(totalsOf(c.key), limitOf(c.key));
           return (
             <span key={c.key} className="usage-cell-wrap">
               {i > 0 && <span className="usage-sep" />}
@@ -141,7 +143,7 @@ function LimitEditor({ limits, usage, onClose }: {
             value={draft[c.key]}
             onChange={(e) => setDraft((d) => ({ ...d, [c.key]: e.target.value }))}
           />
-          <span className="hint">현재 {fmt(usage[c.key].total)}</span>
+          <span className="hint">현재 {fmt(usage[c.key].weighted)}</span>
         </label>
       ))}
       <div className="usage-editor-actions">

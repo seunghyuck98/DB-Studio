@@ -328,7 +328,10 @@ export interface UsageTotals {
   output: number;
   cacheCreate: number;
   cacheRead: number;
+  /** 원시 합계 (input+output+cacheCreate+cacheRead) */
   total: number;
+  /** 가중 합계 — % 표시 기준 (캐시 읽기를 0.1배로) */
+  weighted: number;
 }
 
 export type AgentEvent =

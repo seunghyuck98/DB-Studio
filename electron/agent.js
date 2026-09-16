@@ -12,6 +12,14 @@ const os = require('os');
  * 응답은 스트리밍으로 렌더러에 이벤트로 흘려보낸다.
  */
 
+const usage = require('./usage');
+
+/** 앱 내 대화 CLI 기록을 전용 폴더에 모아, usage 스캔에서 제외하고 직접 집계한다. */
+const AGENT_CWD = path.join(os.homedir(), '.dbstudio', 'agent-sessions');
+
+/** 세션별 모델 누적 사용량 — result 는 세션 누적이라 delta 를 뽑아 기록한다. */
+const sessionUsage = new Map();
+
 let sdkPromise = null;
 function loadSdk() {
   if (!sdkPromise) sdkPromise = import('@anthropic-ai/claude-agent-sdk');
@@ -139,6 +147,8 @@ async function ask(req, onEvent) {
   if (req.apiKey) env.ANTHROPIC_API_KEY = req.apiKey;
   env.CLAUDE_AGENT_SDK_CLIENT_APP = 'db-studio/1.0';
 
+  try { fs.mkdirSync(AGENT_CWD, { recursive: true }); } catch (_) { /* 무시 */ }
+
   const controller = new AbortController();
   runs.set(runId, { abort: () => controller.abort(), sessionId: resume });
 
@@ -148,6 +158,7 @@ async function ask(req, onEvent) {
       options: {
         pathToClaudeCodeExecutable: claudeExecutable(),
         executable: 'node',
+        cwd: AGENT_CWD, // CLI 기록을 한곳에 모아 usage 스캔에서 제외한다
         abortController: controller,
         // 조회 도구는 자동 허용하되, DB 를 바꾸는 SQL 은 canUseTool 에서 막는다.
         permissionMode: 'default',
@@ -212,6 +223,7 @@ function relay(msg, onEvent) {
       break;
     }
     case 'result':
+      recordUsage(msg);
       onEvent({
         type: 'result',
         text: msg.subtype === 'success' ? (msg.result ?? '') : '',
@@ -223,6 +235,36 @@ function relay(msg, onEvent) {
     default:
       break;
   }
+}
+
+/**
+ * result 의 modelUsage(세션 누적)에서 이번 턴 delta 를 뽑아 usage 에 기록한다.
+ * 같은 세션의 이전 누적을 빼야 여러 턴이 합산되지 않고 정확히 더해진다.
+ */
+function recordUsage(msg) {
+  const models = msg.modelUsage;
+  if (!models || typeof models !== 'object') return;
+  const session = msg.session_id || 'default';
+  const prev = sessionUsage.get(session) || {};
+  const next = {};
+  for (const [model, mu] of Object.entries(models)) {
+    const cur = {
+      input: mu.inputTokens || 0,
+      output: mu.outputTokens || 0,
+      cacheCreate: mu.cacheCreationInputTokens || 0,
+      cacheRead: mu.cacheReadInputTokens || 0,
+    };
+    next[model] = cur;
+    const was = prev[model] || { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
+    const delta = {
+      input: Math.max(0, cur.input - was.input),
+      output: Math.max(0, cur.output - was.output),
+      cacheCreate: Math.max(0, cur.cacheCreate - was.cacheCreate),
+      cacheRead: Math.max(0, cur.cacheRead - was.cacheRead),
+    };
+    usage.recordAgentUsage(model, delta);
+  }
+  sessionUsage.set(session, next);
 }
 
 /** 도구 입력에서 SQL 한 줄만 뽑아 사이드바에 보여 준다 (너무 길면 자른다). */

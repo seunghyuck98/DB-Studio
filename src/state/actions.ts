@@ -60,7 +60,7 @@ function clampChat(w: unknown): number {
 }
 
 function sanitizeLimits(v: unknown): { fiveHour: number; weekFable: number; weekAll: number } {
-  const d = { fiveHour: 50_000_000, weekFable: 1_000_000_000, weekAll: 3_000_000_000 };
+  const d = { fiveHour: 28_000_000, weekFable: 120_000_000, weekAll: 350_000_000 };
   if (!v || typeof v !== 'object') return d;
   const o = v as Record<string, unknown>;
   const pick = (k: keyof typeof d) => {

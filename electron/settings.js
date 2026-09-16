@@ -16,7 +16,7 @@ const DEFAULTS = {
    * 토큰 사용량 % 표시의 기준 한도. Anthropic 이 실제 한도를 공개하지 않으므로
    * 사용자가 조절하는 기준값이다 (기본은 넉넉한 어림값).
    */
-  usageLimits: { fiveHour: 50_000_000, weekFable: 1_000_000_000, weekAll: 3_000_000_000 },
+  usageLimits: { fiveHour: 28_000_000, weekFable: 120_000_000, weekAll: 350_000_000 },
 };
 
 let cache = null;

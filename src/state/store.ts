@@ -97,7 +97,7 @@ const initialState: AppState = {
   splitOnBlankLine: false,
   sidebarWidth: 280,
   chatWidth: 380,
-  usageLimits: { fiveHour: 50_000_000, weekFable: 1_000_000_000, weekAll: 3_000_000_000 },
+  usageLimits: { fiveHour: 28_000_000, weekFable: 120_000_000, weekAll: 350_000_000 },
   dialog: null,
 };
 
