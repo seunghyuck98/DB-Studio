@@ -178,6 +178,7 @@ handle('sql:explain', (id, sql, opts) => db.explain(id, sql, opts));
 
 handle('ddl:preview', (id, args) => db.previewColumnDDL(id, args));
 handle('ddl:execute', (id, statements) => db.executeDDL(id, statements));
+handle('ddl:build', (id, kind, args) => db.buildDDL(id, kind, args));
 
 handle('export:rows', (req) => exporter.exportRows(req));
 handle('export:query', async (id, req) => {

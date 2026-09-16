@@ -5,7 +5,7 @@ import DdlPreviewDialog from './DdlPreviewDialog';
 import { getTabScratch, setTabScratch, notify, sessionOf, getState, openSqlTab } from '../state/store';
 import { message } from '../state/actions';
 import type {
-  ColumnChangeSpec, ColumnSpec, ForeignKeyMeta, IndexMeta, KeyMeta,
+  CheckMeta, ColumnChangeSpec, ColumnSpec, ForeignKeyMeta, IndexMeta, KeyMeta,
   ReferenceMeta, TableColumn, TableGrant, TableMeta, TablePrivileges, TableTab,
 } from '../types';
 
@@ -50,6 +50,7 @@ function rowMatch(q: string, values: unknown[]): boolean {
 interface Loaded {
   columns: TableColumn[];
   keys: KeyMeta[];
+  checks: CheckMeta[];
   foreignKeys: ForeignKeyMeta[];
   references: ReferenceMeta[];
   indexes: IndexMeta[];
@@ -95,6 +96,7 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
       ...data,
       columns: data.columns.filter((c) => rowMatch(q, [c.name, c.dataType, c.defaultValue, c.comment])),
       keys: data.keys.filter((k) => rowMatch(q, [k.name, k.type, k.columns.join(',')])),
+      checks: data.checks.filter((c) => rowMatch(q, [c.name, c.expression])),
       foreignKeys: data.foreignKeys.filter((f) => rowMatch(q, [f.name, f.columns.join(','), f.referencedSchema, f.referencedTable, f.referencedColumns.join(',')])),
       references: data.references.filter((r) => rowMatch(q, [r.name, r.sourceSchema, r.sourceTable, r.columns.join(','), r.referencedColumns.join(',')])),
       indexes: data.indexes.filter((i) => rowMatch(q, [i.name, i.type, i.columns.join(',')])),
@@ -110,9 +112,10 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
     setError(null);
     const args = { schema: tab.schema, table: tab.table };
     try {
-      const [columns, keys, foreignKeys, references, indexes, privileges, ddl, tables] = await Promise.all([
+      const [columns, keys, checks, foreignKeys, references, indexes, privileges, ddl, tables] = await Promise.all([
         window.api.meta.get(tab.connectionId, 'columns', args),
         window.api.meta.get(tab.connectionId, 'keys', args),
+        window.api.meta.get(tab.connectionId, 'checks', args),
         window.api.meta.get(tab.connectionId, 'foreignKeys', args),
         window.api.meta.get(tab.connectionId, 'references', args),
         window.api.meta.get(tab.connectionId, 'indexes', args),
@@ -121,7 +124,7 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
         window.api.meta.get(tab.connectionId, 'tables', { schema: tab.schema }),
       ]);
       const info = (tables as TableMeta[]).find((t) => t.name === tab.table) ?? null;
-      setData({ columns, keys, foreignKeys, references, indexes, privileges, ddl, info });
+      setData({ columns, keys, checks, foreignKeys, references, indexes, privileges, ddl, info });
     } catch (e) {
       setError(message(e));
     } finally {
@@ -168,9 +171,13 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
           />
           {q && view && (
             <span className="hint">
-              {section === 'privileges' ? view.privileges.grants.length : view[section].length}
+              {section === 'privileges' ? view.privileges.grants.length
+                : section === 'keys' ? view.keys.length + view.checks.length
+                : view[section].length}
               {' / '}
-              {section === 'privileges' ? data.privileges.grants.length : data[section].length}
+              {section === 'privileges' ? data.privileges.grants.length
+                : section === 'keys' ? data.keys.length + data.checks.length
+                : data[section].length}
             </span>
           )}
           <button className="icon-btn" aria-label="찾기 닫기" onClick={closeFind}>×</button>
@@ -183,10 +190,16 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
       {view && !loading && (
         <div className="props-body">
           {section === 'columns' && <ColumnsPanel tab={tab} rows={view.columns} allRows={data!.columns} onChanged={load} />}
-          {section === 'keys' && <KeysTable rows={view.keys} />}
-          {section === 'foreignKeys' && <ForeignKeysTable rows={view.foreignKeys} />}
+          {section === 'keys' && (
+            <KeysPanel tab={tab} keys={view.keys} checks={view.checks} allKeys={data!.keys} columns={data!.columns} onChanged={load} />
+          )}
+          {section === 'foreignKeys' && (
+            <ForeignKeysPanel tab={tab} rows={view.foreignKeys} columns={data!.columns} onChanged={load} />
+          )}
           {section === 'references' && <ReferencesTable rows={view.references} />}
-          {section === 'indexes' && <IndexesTable rows={view.indexes} />}
+          {section === 'indexes' && (
+            <IndexesPanel tab={tab} rows={view.indexes} keys={data!.keys} foreignKeys={data!.foreignKeys} onChanged={load} />
+          )}
           {section === 'privileges' && <PrivilegesTable data={view.privileges} />}
           {section === 'ddl' && <DdlPanel tab={tab} ddl={view.ddl} onChanged={load} />}
         </div>
@@ -535,41 +548,332 @@ function PrivilegesTable({ data }: { data: TablePrivileges }) {
 
 // ---- 읽기 전용 표 --------------------------------------------------------------
 
-function KeysTable({ rows }: { rows: KeyMeta[] }) {
-  if (!rows.length) return <Empty what="키" />;
+/**
+ * 클릭 순서대로 컬럼을 고르는 선택기.
+ * 복합 키·인덱스에서는 컬럼 순서가 의미를 가지므로 체크 순서를 그대로 쓴다.
+ */
+function ColumnPicker({ columns, value, onChange }: {
+  columns: string[];
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
   return (
-    <table className="meta-table">
-      <thead><tr><th>이름</th><th>종류</th><th>컬럼</th></tr></thead>
-      <tbody>
-        {rows.map((k) => (
-          <tr key={k.name}>
-            <td className="mono strong">{k.name}</td>
-            <td>{k.type}</td>
-            <td className="mono">{k.columns.join(', ')}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="col-picker">
+      {columns.map((name) => {
+        const order = value.indexOf(name);
+        return (
+          <label key={name} className={`col-pick ${order >= 0 ? 'on' : ''}`}>
+            <input
+              type="checkbox"
+              checked={order >= 0}
+              onChange={() => onChange(order >= 0 ? value.filter((v) => v !== name) : [...value, name])}
+            />
+            {order >= 0 && value.length > 1 && <span className="pick-order">{order + 1}</span>}
+            <span className="mono">{name}</span>
+          </label>
+        );
+      })}
+    </div>
   );
 }
 
-function ForeignKeysTable({ rows }: { rows: ForeignKeyMeta[] }) {
-  if (!rows.length) return <Empty what="외래키" />;
+/** DDL 미리보기를 띄우는 공통 도우미 — 생성은 메인 프로세스 드라이버가 한다. */
+function useDdlPreview(tab: TableTab, onChanged: () => void) {
+  const [preview, setPreview] = useState<{ title: string; statements: string[] } | null>(null);
+  const session = sessionOf(tab.connectionId, getState());
+
+  const build = async (title: string, kind: 'index' | 'constraint', spec: Record<string, unknown>) => {
+    try {
+      const statements = await window.api.ddl.build(tab.connectionId, kind, {
+        schema: tab.schema, table: tab.table, spec,
+      });
+      setPreview({ title, statements });
+    } catch (e) {
+      notify('error', message(e));
+    }
+  };
+
+  const dialog = preview ? (
+    <DdlPreviewDialog
+      connectionId={tab.connectionId}
+      title={preview.title}
+      statements={preview.statements}
+      autoCommit={session?.autoCommit ?? true}
+      transactionalDdl={session?.kind === 'postgres'}
+      onClose={() => setPreview(null)}
+      onApplied={onChanged}
+    />
+  ) : null;
+
+  return { build, dialog };
+}
+
+// ---- 키 (기본키·유니크·CHECK 제약) ------------------------------------------------
+
+type KeyForm =
+  | { kind: 'PRIMARY KEY'; columns: string[] }
+  | { kind: 'UNIQUE'; name: string; columns: string[] }
+  | { kind: 'CHECK'; name: string; expression: string };
+
+function KeysPanel({ tab, keys, checks, allKeys, columns, onChanged }: {
+  tab: TableTab;
+  /** 화면에 보여줄 (찾기로 걸러진) 행 */
+  keys: KeyMeta[];
+  checks: CheckMeta[];
+  /** 걸러지지 않은 전체 키 — 기본키 존재 여부는 이걸로 판단해야 한다 */
+  allKeys: KeyMeta[];
+  columns: TableColumn[];
+  onChanged: () => void;
+}) {
+  const [form, setForm] = useState<KeyForm | null>(null);
+  const { build, dialog } = useDdlPreview(tab, () => { setForm(null); onChanged(); });
+  const session = sessionOf(tab.connectionId, getState());
+  const editable = tab.objectKind === 'table';
+  const hasPk = allKeys.some((k) => k.type === 'PRIMARY KEY');
+  const colNames = columns.map((c) => c.name);
+
+  const dropKey = (k: KeyMeta) => {
+    // MySQL 계열: 자동 증가 컬럼이 기본키에 있으면 PK 만 지울 수 없다 (에러 1075).
+    if (k.type === 'PRIMARY KEY' && session?.kind !== 'postgres') {
+      const ai = columns.filter((c) => c.primaryKey && c.autoIncrement).map((c) => c.name);
+      if (ai.length) {
+        notify('error', `자동 증가 컬럼(${ai.join(', ')})이 기본키에 있어 기본키만 지울 수 없습니다. 컬럼 편집에서 자동 증가를 먼저 제거하세요.`);
+        return;
+      }
+    }
+    void build(`${tab.schema}.${tab.table} — ${k.type === 'PRIMARY KEY' ? '기본키' : '유니크'} 삭제`, 'constraint',
+      { action: 'drop', kind: k.type, name: k.name });
+  };
+
+  const submit = () => {
+    if (!form) return;
+    if (form.kind === 'PRIMARY KEY') {
+      if (!form.columns.length) { notify('info', '컬럼을 골라 주세요.'); return; }
+      void build(`${tab.schema}.${tab.table} — 기본키 추가`, 'constraint',
+        { action: 'add', kind: 'PRIMARY KEY', columns: form.columns });
+    } else if (form.kind === 'UNIQUE') {
+      if (!form.name.trim() || !form.columns.length) { notify('info', '이름과 컬럼을 채워 주세요.'); return; }
+      void build(`${tab.schema}.${tab.table} — 유니크 제약 추가`, 'constraint',
+        { action: 'add', kind: 'UNIQUE', name: form.name.trim(), columns: form.columns });
+    } else {
+      if (!form.name.trim() || !form.expression.trim()) { notify('info', '이름과 조건식을 채워 주세요.'); return; }
+      void build(`${tab.schema}.${tab.table} — CHECK 제약 추가`, 'constraint',
+        { action: 'add', kind: 'CHECK', name: form.name.trim(), expression: form.expression.trim() });
+    }
+  };
+
   return (
-    <table className="meta-table">
-      <thead><tr><th>이름</th><th>컬럼</th><th>참조 대상</th><th>ON UPDATE</th><th>ON DELETE</th></tr></thead>
-      <tbody>
-        {rows.map((f) => (
-          <tr key={f.name}>
-            <td className="mono strong">{f.name}</td>
-            <td className="mono">{f.columns.join(', ')}</td>
-            <td className="mono">{f.referencedSchema}.{f.referencedTable} ({f.referencedColumns.join(', ')})</td>
-            <td>{f.onUpdate ?? ''}</td>
-            <td>{f.onDelete ?? ''}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div>
+      {editable && (
+        <div className="panel-toolbar">
+          <button
+            className="btn small"
+            disabled={hasPk}
+            title={hasPk ? '기본키가 이미 있습니다' : ''}
+            onClick={() => setForm({ kind: 'PRIMARY KEY', columns: [] })}
+          >
+            + 기본키
+          </button>
+          <button className="btn small" onClick={() => setForm({ kind: 'UNIQUE', name: `uq_${tab.table}`, columns: [] })}>
+            + 유니크
+          </button>
+          <button className="btn small" onClick={() => setForm({ kind: 'CHECK', name: `ck_${tab.table}`, expression: '' })}>
+            + CHECK
+          </button>
+        </div>
+      )}
+
+      {form && (
+        <div className="ddl-form">
+          <b>{form.kind === 'PRIMARY KEY' ? '기본키 추가' : form.kind === 'UNIQUE' ? '유니크 제약 추가' : 'CHECK 제약 추가'}</b>
+          {form.kind !== 'PRIMARY KEY' && (
+            <label>이름 <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+          )}
+          {form.kind === 'CHECK' ? (
+            <label>조건식 <input
+              className="input wide mono"
+              placeholder={"예: status IN ('A', 'B')"}
+              value={form.expression}
+              onChange={(e) => setForm({ ...form, expression: e.target.value })}
+            /></label>
+          ) : (
+            <ColumnPicker columns={colNames} value={form.columns} onChange={(v) => setForm({ ...form, columns: v })} />
+          )}
+          <div className="ddl-form-actions">
+            <button className="btn small" onClick={() => setForm(null)}>취소</button>
+            <button className="btn small primary" onClick={submit}>변경 SQL 보기</button>
+          </div>
+        </div>
+      )}
+
+      {keys.length + checks.length === 0 ? <Empty what="키" /> : (
+        <table className="meta-table">
+          <thead><tr><th>이름</th><th>종류</th><th>컬럼 / 조건식</th>{editable && <th />}</tr></thead>
+          <tbody>
+            {keys.map((k) => (
+              <tr key={`k-${k.name}`}>
+                <td className="mono strong">{k.name}</td>
+                <td>{k.type}</td>
+                <td className="mono">{k.columns.join(', ')}</td>
+                {editable && (
+                  <td className="center">
+                    <button className="icon-btn danger" title="삭제" onClick={() => dropKey(k)}>−</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+            {checks.map((c) => (
+              <tr key={`c-${c.name}`}>
+                <td className="mono strong">{c.name}</td>
+                <td>CHECK</td>
+                <td className="mono">{c.expression}</td>
+                {editable && (
+                  <td className="center">
+                    <button
+                      className="icon-btn danger"
+                      title="삭제"
+                      onClick={() => void build(`${tab.schema}.${tab.table} — CHECK 제약 삭제`, 'constraint',
+                        { action: 'drop', kind: 'CHECK', name: c.name })}
+                    >−</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {dialog}
+    </div>
+  );
+}
+
+// ---- 외래키 -----------------------------------------------------------------------
+
+interface FkForm {
+  name: string;
+  columns: string[];
+  refSchema: string;
+  refTable: string;
+  refColumns: string;
+  onUpdate: string;
+  onDelete: string;
+}
+
+function ForeignKeysPanel({ tab, rows, columns, onChanged }: {
+  tab: TableTab;
+  rows: ForeignKeyMeta[];
+  columns: TableColumn[];
+  onChanged: () => void;
+}) {
+  const [form, setForm] = useState<FkForm | null>(null);
+  const { build, dialog } = useDdlPreview(tab, () => { setForm(null); onChanged(); });
+  const session = sessionOf(tab.connectionId, getState());
+  const editable = tab.objectKind === 'table';
+  const pg = session?.kind === 'postgres';
+  // InnoDB 는 SET DEFAULT 를 거부하므로 PG 에서만 보여 준다.
+  const actions = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', ...(pg ? ['SET DEFAULT'] : [])];
+
+  const submit = () => {
+    if (!form) return;
+    const refColumns = form.refColumns.split(',').map((v) => v.trim()).filter(Boolean);
+    if (!form.name.trim() || !form.columns.length || !form.refTable.trim() || !refColumns.length) {
+      notify('info', '이름·컬럼·참조 대상을 채워 주세요.');
+      return;
+    }
+    if (refColumns.length !== form.columns.length) {
+      notify('info', '컬럼 수와 참조 컬럼 수가 같아야 합니다.');
+      return;
+    }
+    void build(`${tab.schema}.${tab.table} — 외래키 추가`, 'constraint', {
+      action: 'add',
+      kind: 'FOREIGN KEY',
+      name: form.name.trim(),
+      columns: form.columns,
+      refSchema: form.refSchema.trim() || tab.schema,
+      refTable: form.refTable.trim(),
+      refColumns,
+      onUpdate: form.onUpdate || null,
+      onDelete: form.onDelete || null,
+    });
+  };
+
+  return (
+    <div>
+      {editable && (
+        <div className="panel-toolbar">
+          <button
+            className="btn small"
+            onClick={() => setForm({
+              name: `fk_${tab.table}`, columns: [], refSchema: tab.schema, refTable: '', refColumns: '',
+              onUpdate: '', onDelete: '',
+            })}
+          >
+            + 외래키
+          </button>
+          {pg && <span className="hint">PostgreSQL 은 외래키 컬럼에 인덱스를 자동으로 만들지 않습니다 — 필요하면 인덱스 탭에서 함께 만드세요.</span>}
+        </div>
+      )}
+
+      {form && (
+        <div className="ddl-form">
+          <b>외래키 추가</b>
+          <label>이름 <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+          <span className="hint">이 테이블의 컬럼:</span>
+          <ColumnPicker columns={columns.map((c) => c.name)} value={form.columns} onChange={(v) => setForm({ ...form, columns: v })} />
+          <div className="ddl-form-row">
+            <label>참조 스키마 <input className="input" value={form.refSchema} onChange={(e) => setForm({ ...form, refSchema: e.target.value })} /></label>
+            <label>참조 테이블 <input className="input" value={form.refTable} onChange={(e) => setForm({ ...form, refTable: e.target.value })} /></label>
+            <label>참조 컬럼 <input className="input" placeholder="쉼표로 구분" value={form.refColumns} onChange={(e) => setForm({ ...form, refColumns: e.target.value })} /></label>
+          </div>
+          <div className="ddl-form-row">
+            <label>ON UPDATE
+              <select className="select small" value={form.onUpdate} onChange={(e) => setForm({ ...form, onUpdate: e.target.value })}>
+                <option value="">(기본)</option>
+                {actions.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </label>
+            <label>ON DELETE
+              <select className="select small" value={form.onDelete} onChange={(e) => setForm({ ...form, onDelete: e.target.value })}>
+                <option value="">(기본)</option>
+                {actions.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="ddl-form-actions">
+            <button className="btn small" onClick={() => setForm(null)}>취소</button>
+            <button className="btn small primary" onClick={submit}>변경 SQL 보기</button>
+          </div>
+        </div>
+      )}
+
+      {rows.length === 0 ? <Empty what="외래키" /> : (
+        <table className="meta-table">
+          <thead><tr><th>이름</th><th>컬럼</th><th>참조 대상</th><th>ON UPDATE</th><th>ON DELETE</th>{editable && <th />}</tr></thead>
+          <tbody>
+            {rows.map((f) => (
+              <tr key={f.name}>
+                <td className="mono strong">{f.name}</td>
+                <td className="mono">{f.columns.join(', ')}</td>
+                <td className="mono">{f.referencedSchema}.{f.referencedTable} ({f.referencedColumns.join(', ')})</td>
+                <td>{f.onUpdate ?? ''}</td>
+                <td>{f.onDelete ?? ''}</td>
+                {editable && (
+                  <td className="center">
+                    <button
+                      className="icon-btn danger"
+                      title="삭제"
+                      onClick={() => void build(`${tab.schema}.${tab.table} — 외래키 삭제`, 'constraint',
+                        { action: 'drop', kind: 'FOREIGN KEY', name: f.name })}
+                    >−</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {dialog}
+    </div>
   );
 }
 
@@ -592,21 +896,124 @@ function ReferencesTable({ rows }: { rows: ReferenceMeta[] }) {
   );
 }
 
-function IndexesTable({ rows }: { rows: IndexMeta[] }) {
-  if (!rows.length) return <Empty what="인덱스" />;
+interface IndexForm {
+  name: string;
+  unique: boolean;
+  columns: string[];
+  method: string;
+}
+
+function IndexesPanel({ tab, rows, keys, foreignKeys, onChanged }: {
+  tab: TableTab;
+  rows: IndexMeta[];
+  keys: KeyMeta[];
+  foreignKeys: ForeignKeyMeta[];
+  onChanged: () => void;
+}) {
+  const [form, setForm] = useState<IndexForm | null>(null);
+  const [cols, setCols] = useState<string[]>([]);
+  const { build, dialog } = useDdlPreview(tab, () => { setForm(null); onChanged(); });
+  const session = sessionOf(tab.connectionId, getState());
+  const editable = tab.objectKind === 'table';
+  const pg = session?.kind === 'postgres';
+  // 제약이 소유한 인덱스는 인덱스로 못 지운다 — 키 탭에서 제약을 지워야 한다.
+  const ownedByKey = new Set(keys.map((k) => k.name));
+  // MySQL 은 FK 가 쓰는 인덱스 삭제를 거부한다(에러 1553). 이름이 겹치는 것만 확실히 알 수 있어
+  // 막지는 않고 경고만 한다 — 다른 인덱스가 FK 를 대신 받쳐 주면 삭제가 되기도 한다.
+  const fkNames = new Set(foreignKeys.map((f) => f.name));
+
+  // 컬럼 목록은 폼을 열 때 한 번 읽는다 (인덱스 탭은 컬럼 메타가 없어서).
+  const openForm = async () => {
+    try {
+      const list: TableColumn[] = await window.api.meta.get(tab.connectionId, 'columns', {
+        schema: tab.schema, table: tab.table,
+      });
+      setCols(list.map((c) => c.name));
+      setForm({ name: `idx_${tab.table}`, unique: false, columns: [], method: 'btree' });
+    } catch (e) {
+      notify('error', message(e));
+    }
+  };
+
+  const submit = () => {
+    if (!form) return;
+    if (!form.name.trim() || !form.columns.length) { notify('info', '이름과 컬럼을 채워 주세요.'); return; }
+    void build(`${tab.schema}.${tab.table} — 인덱스 생성`, 'index', {
+      action: 'create',
+      name: form.name.trim(),
+      unique: form.unique,
+      columns: form.columns,
+      ...(pg ? { method: form.method } : {}),
+    });
+  };
+
   return (
-    <table className="meta-table">
-      <thead><tr><th>이름</th><th>고유</th><th>방식</th><th>컬럼</th></tr></thead>
-      <tbody>
-        {rows.map((i) => (
-          <tr key={i.name}>
-            <td className="mono strong">{i.name}</td>
-            <td>{i.unique ? '✓' : ''}</td>
-            <td>{i.type}</td>
-            <td className="mono">{i.columns.join(', ')}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div>
+      {editable && (
+        <div className="panel-toolbar">
+          <button className="btn small" onClick={() => void openForm()}>+ 인덱스</button>
+        </div>
+      )}
+
+      {form && (
+        <div className="ddl-form">
+          <b>인덱스 생성</b>
+          <div className="ddl-form-row">
+            <label>이름 <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+            <label className="check small">
+              <input type="checkbox" checked={form.unique} onChange={(e) => setForm({ ...form, unique: e.target.checked })} />
+              UNIQUE
+            </label>
+            {pg && (
+              <label>방식
+                <select className="select small" value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}>
+                  {['btree', 'hash', 'gin', 'gist', 'brin'].map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+          <ColumnPicker columns={cols} value={form.columns} onChange={(v) => setForm({ ...form, columns: v })} />
+          <div className="ddl-form-actions">
+            <button className="btn small" onClick={() => setForm(null)}>취소</button>
+            <button className="btn small primary" onClick={submit}>변경 SQL 보기</button>
+          </div>
+        </div>
+      )}
+
+      {rows.length === 0 ? <Empty what="인덱스" /> : (
+        <table className="meta-table">
+          <thead><tr><th>이름</th><th>고유</th><th>방식</th><th>컬럼</th>{editable && <th />}</tr></thead>
+          <tbody>
+            {rows.map((i) => {
+              const owned = ownedByKey.has(i.name) || i.name === 'PRIMARY';
+              return (
+                <tr key={i.name}>
+                  <td className="mono strong">{i.name}</td>
+                  <td>{i.unique ? '✓' : ''}</td>
+                  <td>{i.type}</td>
+                  <td className="mono">{i.columns.join(', ')}</td>
+                  {editable && (
+                    <td className="center">
+                      <button
+                        className="icon-btn danger"
+                        title={owned
+                          ? '제약이 소유한 인덱스 — 키 탭에서 제약을 삭제하세요'
+                          : fkNames.has(i.name)
+                            ? '외래키가 쓰는 인덱스라 삭제가 거부될 수 있습니다'
+                            : '삭제'}
+                        disabled={owned}
+                        onClick={() => void build(`${tab.schema}.${tab.table} — 인덱스 삭제`, 'index',
+                          { action: 'drop', name: i.name })}
+                      >−</button>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      {dialog}
+    </div>
   );
 }

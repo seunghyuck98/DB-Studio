@@ -434,6 +434,7 @@ function metaOn(s, action, args) {
     case 'indexes': return d.listIndexes(args.schema, args.table);
     case 'ddl': return d.getDDL(args.schema, args.table, args.kind);
     case 'privileges': return d.listPrivileges(args.schema, args.table);
+    case 'checks': return d.listChecks(args.schema, args.table);
     default: throw new Error(`알 수 없는 메타데이터 요청: ${action}`);
   }
 }
@@ -698,6 +699,21 @@ function previewColumnDDL(id, { schema, table, spec }) {
  * DDL 문장들을 순서대로 실행한다.
  * 자동 커밋 모드에서는 하나라도 실패하면 전체가 되돌아간다.
  */
+/**
+ * 인덱스·제약·테이블 DDL 을 실행하지 않고 만들어만 준다.
+ * 식별자 인용이 드라이버마다 다르므로 생성은 항상 드라이버가 한다.
+ */
+async function buildDDL(id, kind, args = {}) {
+  const d = get(id).driver;
+  switch (kind) {
+    case 'index': return d.buildIndexDDL(args.schema, args.table, args.spec);
+    case 'constraint': return d.buildConstraintDDL(args.schema, args.table, args.spec);
+    case 'createTable': return d.buildCreateTableDDL(args.schema, args.spec);
+    case 'dropTable': return d.buildDropTableDDL(args.schema, args.table, args.objectKind);
+    default: throw new Error(`알 수 없는 DDL 종류: ${kind}`);
+  }
+}
+
 async function executeDDL(id, statements) {
   const s = get(id);
   await s.ensureAlive();
@@ -737,7 +753,8 @@ module.exports = {
   meta, setSchema, setDatabase,
   selectData, countData, applyChanges, fetchForExport,
   searchObjects,
-  executeScript, explain, previewColumnDDL, executeDDL,
+  executeScript, explain, previewColumnDDL,
+  buildDDL, executeDDL,
   setAutoCommit: async (id, v) => get(id).setAutoCommit(v),
   commit: async (id) => get(id).commit(),
   rollback: async (id) => get(id).rollback(),

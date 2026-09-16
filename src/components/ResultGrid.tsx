@@ -58,7 +58,7 @@ export default function ResultGrid({ result, exportSource }: Props) {
       {recordMode && selectedRow !== null ? (
         <RecordView
           columns={result.columns.map((c) => ({ name: c.name, type: c.type }))}
-          values={result.rows[selectedRow] ?? []}
+          rows={[{ key: `r${selectedRow}`, label: `행 ${selectedRow + 1}`, values: result.rows[selectedRow] ?? [] }]}
           rowNumber={selectedRow + 1}
           totalRows={result.rows.length}
           onPrev={() => setSelectedRow((r) => Math.max(0, (r ?? 0) - 1))}

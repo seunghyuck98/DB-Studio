@@ -88,6 +88,12 @@ export interface TableGrant {
   grantable: boolean;
 }
 
+/** CHECK 제약 하나 */
+export interface CheckMeta {
+  name: string;
+  expression: string;
+}
+
 export interface TablePrivileges {
   /** 소유자 (PostgreSQL 만, MySQL 은 null) */
   owner: string | null;
@@ -370,6 +376,8 @@ declare global {
       };
       ddl: {
         preview(id: string, args: { schema: string; table: string; spec: ColumnChangeSpec }): Promise<string[]>;
+        /** 인덱스·제약·테이블 DDL 문장 생성 (실행하지 않는다) */
+        build(id: string, kind: 'index' | 'constraint' | 'createTable' | 'dropTable', args: Record<string, unknown>): Promise<string[]>;
         execute(id: string, statements: string[] | string): Promise<{ executed: { sql: string; affected: number }[]; status: SessionStatus }>;
       };
       exports: {

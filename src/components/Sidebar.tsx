@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import SearchResults from './SearchResults';
 import ContextMenu, { type MenuState } from './ContextMenu';
+import CreateTableDialog from './CreateTableDialog';
+import DdlPreviewDialog from './DdlPreviewDialog';
 import {
   useAppState, setState, setSearch, clearSearchResult, openTableTab, openSchemaTab, openSqlTab,
   activeConnectionId, sessionOf,
-  type TreeItem, type AppState,
+  type TreeItem, type AppState, closeTab, getState, notify,
 } from '../state/store';
 import { connect, disconnect, reconnect, deleteConnection, toggleNode, refreshNode, runSearch, nodeId } from '../state/actions';
 import type { ConnectionConfig, SearchScopes } from '../types';
@@ -17,6 +19,11 @@ const SCOPE_LABELS: { key: keyof SearchScopes; label: string; hint: string }[] =
 ];
 
 export default function Sidebar() {
+  // 트리 메뉴에서 여는 다이얼로그들 (테이블 생성 / DDL 미리보기)
+  const [createTable, setCreateTable] = useState<{ connectionId: string; database: string; schema: string; refresh: () => void } | null>(null);
+  const [ddlDialog, setDdlDialog] = useState<{
+    connectionId: string; title: string; statements: string[]; onApplied: () => void;
+  } | null>(null);
   const state = useAppState();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [scopeOpen, setScopeOpen] = useState(false);
@@ -134,23 +141,62 @@ export default function Sidebar() {
             <p className="tree-empty">등록된 접속이 없습니다.<br />상단의 <b>+ 접속</b> 버튼으로 추가하세요.</p>
           )}
           {state.connections.map((c) => (
-            <ConnectionRow key={c.id} conn={c} state={state} filter={filter} onMenu={setMenu} />
+            <ConnectionRow
+              key={c.id}
+              conn={c}
+              state={state}
+              filter={filter}
+              onMenu={setMenu}
+              hooks={{ onCreateTable: setCreateTable, onDdl: setDdlDialog }}
+            />
           ))}
         </div>
       )}
 
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {createTable && (
+        <CreateTableDialog
+          connectionId={createTable.connectionId}
+          database={createTable.database}
+          schema={createTable.schema}
+          onClose={() => setCreateTable(null)}
+          onCreated={createTable.refresh}
+        />
+      )}
+      {ddlDialog && (
+        <DdlPreviewDialog
+          connectionId={ddlDialog.connectionId}
+          title={ddlDialog.title}
+          statements={ddlDialog.statements}
+          autoCommit={state.sessions[ddlDialog.connectionId]?.autoCommit ?? true}
+          transactionalDdl={state.sessions[ddlDialog.connectionId]?.kind === 'postgres'}
+          onClose={() => setDdlDialog(null)}
+          onApplied={ddlDialog.onApplied}
+        />
+      )}
     </aside>
   );
+}
+
+/** 테이블이 생기거나 사라졌음을 알린다 — 열려 있는 스키마 목록 탭이 다시 읽는다. */
+function notifyTablesChanged(connectionId: string, schema: string): void {
+  window.dispatchEvent(new CustomEvent('dbstudio:tables-changed', { detail: { connectionId, schema } }));
+}
+
+/** 트리 메뉴가 여는 다이얼로그 요청 (Sidebar 루트가 실제로 띄운다) */
+interface DialogHooks {
+  onCreateTable: (args: { connectionId: string; database: string; schema: string; refresh: () => void }) => void;
+  onDdl: (args: { connectionId: string; title: string; statements: string[]; onApplied: () => void }) => void;
 }
 
 interface RowProps {
   state: AppState;
   filter: string;
   onMenu: (m: MenuState) => void;
+  hooks: DialogHooks;
 }
 
-function ConnectionRow({ conn, state, filter, onMenu }: RowProps & { conn: ConnectionConfig }) {
+function ConnectionRow({ conn, state, filter, onMenu, hooks }: RowProps & { conn: ConnectionConfig }) {
   const id = nodeId.connection(conn.id);
   const session = state.sessions[conn.id];
   const connected = !!session?.connected;
@@ -206,13 +252,13 @@ function ConnectionRow({ conn, state, filter, onMenu }: RowProps & { conn: Conne
         <span className="tree-detail">{session?.stale ? '연결 끊김' : conn.kind}</span>
       </div>
       {connected && expanded && (
-        <ChildList nodeKey={id} state={state} filter={filter} onMenu={onMenu} depth={1} />
+        <ChildList nodeKey={id} state={state} filter={filter} onMenu={onMenu} hooks={hooks} depth={1} />
       )}
     </div>
   );
 }
 
-function ChildList({ nodeKey, state, filter, onMenu, depth }: RowProps & { nodeKey: string; depth: number }) {
+function ChildList({ nodeKey, state, filter, onMenu, hooks, depth }: RowProps & { nodeKey: string; depth: number }) {
   const node = state.nodes[nodeKey];
   if (!node) return null;
   if (node.loading) return <div className={`tree-row depth-${depth} loading`}>불러오는 중…</div>;
@@ -228,7 +274,7 @@ function ChildList({ nodeKey, state, filter, onMenu, depth }: RowProps & { nodeK
   return (
     <>
       {visible.map((child) => (
-        <ItemRow key={child.id} item={child} state={state} filter={filter} onMenu={onMenu} depth={depth} />
+        <ItemRow key={child.id} item={child} state={state} filter={filter} onMenu={onMenu} hooks={hooks} depth={depth} />
       ))}
     </>
   );
@@ -263,7 +309,7 @@ function filterChildren(children: TreeItem[], state: AppState, filter: string): 
   return children.filter((c) => isUnloadedContainer(c, state));
 }
 
-function ItemRow({ item, state, filter, onMenu, depth }: RowProps & { item: TreeItem; depth: number }) {
+function ItemRow({ item, state, filter, onMenu, hooks, depth }: RowProps & { item: TreeItem; depth: number }) {
   const expanded = !!state.expanded[item.id];
   const leaf = isLeaf(item);
 
@@ -302,6 +348,39 @@ function ItemRow({ item, state, filter, onMenu, depth }: RowProps & { item: Tree
           `SELECT * FROM ${item.schema}.${item.table};`,
         ),
       });
+      items.push({
+        label: item.type === 'view' ? '뷰 삭제…' : '테이블 삭제…',
+        danger: true,
+        separated: true,
+        action: async () => {
+          try {
+            const statements = await window.api.ddl.build(item.connectionId, 'dropTable', {
+              schema: item.schema, table: item.table, objectKind: item.type === 'view' ? 'view' : 'table',
+            });
+            const session = state.sessions[item.connectionId];
+            // 지운 뒤에는 열린 탭을 닫고 상위(스키마/DB) 노드를 다시 읽는다.
+            const parent: TreeItem = session?.hasSchemaLevel
+              ? { id: nodeId.schema(item.connectionId, item.database!, item.schema!), type: 'schema', label: item.schema!, connectionId: item.connectionId, database: item.database, schema: item.schema }
+              : { id: nodeId.database(item.connectionId, item.database!), type: 'database', label: item.database!, connectionId: item.connectionId, database: item.database };
+            hooks.onDdl({
+              connectionId: item.connectionId,
+              title: `${item.schema}.${item.table} ${item.type === 'view' ? '뷰' : '테이블'} 삭제`,
+              statements,
+              onApplied: () => {
+                // 검색으로 연 탭은 id 의 database 조각이 다를 수 있어, 스키마·테이블로 찾아 모두 닫는다.
+                for (const t of getState().tabs) {
+                  if (t.kind === 'table' && t.connectionId === item.connectionId
+                    && t.schema === item.schema && t.table === item.table) closeTab(t.id);
+                }
+                void refreshNode(parent);
+                notifyTablesChanged(item.connectionId, item.schema!);
+              },
+            });
+          } catch (e) {
+            notify('error', e instanceof Error ? e.message : String(e));
+          }
+        },
+      });
     } else {
       items.push({ label: '새로 고침', action: () => void refreshNode(item) });
       if (item.type === 'schema' || item.type === 'database') {
@@ -310,6 +389,18 @@ function ItemRow({ item, state, filter, onMenu, depth }: RowProps & { item: Tree
           items.push({
             label: '테이블 목록 열기',
             action: () => openSchemaTab(item.connectionId, item.database!, item.schema ?? item.database!),
+          });
+          items.push({
+            label: '테이블 생성…',
+            action: () => hooks.onCreateTable({
+              connectionId: item.connectionId,
+              database: item.database!,
+              schema: item.schema ?? item.database!,
+              refresh: () => {
+                void refreshNode(item);
+                notifyTablesChanged(item.connectionId, item.schema ?? item.database!);
+              },
+            }),
           });
         }
         items.push({
@@ -334,7 +425,7 @@ function ItemRow({ item, state, filter, onMenu, depth }: RowProps & { item: Tree
         {item.detail && <span className="tree-detail">{item.detail}</span>}
       </div>
       {!leaf && expanded && (
-        <ChildList nodeKey={item.id} state={state} filter={filter} onMenu={onMenu} depth={depth + 1} />
+        <ChildList nodeKey={item.id} state={state} filter={filter} onMenu={onMenu} hooks={hooks} depth={depth + 1} />
       )}
     </div>
   );

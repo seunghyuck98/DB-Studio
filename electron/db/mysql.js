@@ -462,6 +462,117 @@ class MySqlDriver {
   // ---- DDL 생성 --------------------------------------------------------------
 
   /** 컬럼 편집 내용을 ALTER TABLE 문 목록으로 바꾼다. */
+
+  // ---- 인덱스·제약·테이블 DDL ------------------------------------------------
+
+  /** FK 동작 옵션 화이트리스트 — 임의 문자열이 DDL 에 섞여 들어가지 않게 한다. */
+  static FK_ACTIONS = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL'];
+
+  /** CHECK 제약 목록. 지원하지 않는 서버(MySQL <8.0.16 등)에서는 빈 목록. */
+  async listChecks(schema, table) {
+    try {
+      return await this.doListChecks(schema, table);
+    } catch (e) {
+      // information_schema.check_constraints 자체가 없는 옛 버전만 빈 목록으로 취급한다.
+      // 연결 끊김 같은 오류까지 삼키면 재연결 경로가 못 돌고 CHECK 가 조용히 '없음'이 된다.
+      if (e && (e.code === 'ER_UNKNOWN_TABLE' || e.errno === 1109 || e.errno === 1146)) return [];
+      throw e;
+    }
+  }
+
+  async doListChecks(schema, table) {
+    {
+      if (this.isMariaDb) {
+        const r = await this.rows(
+          `SELECT constraint_name AS name, check_clause AS expression
+             FROM information_schema.check_constraints
+            WHERE constraint_schema = ? AND table_name = ?
+            ORDER BY constraint_name`,
+          [schema, table],
+        );
+        return r.map((x) => ({ name: x.name, expression: x.expression }));
+      }
+      const r = await this.rows(
+        `SELECT tc.constraint_name AS name, cc.check_clause AS expression
+           FROM information_schema.table_constraints tc
+           JOIN information_schema.check_constraints cc
+             ON cc.constraint_schema = tc.constraint_schema AND cc.constraint_name = tc.constraint_name
+          WHERE tc.constraint_type = 'CHECK' AND tc.table_schema = ? AND tc.table_name = ?
+          ORDER BY tc.constraint_name`,
+        [schema, table],
+      );
+      return r.map((x) => ({ name: x.name, expression: x.expression }));
+    }
+  }
+
+  buildIndexDDL(schema, table, spec) {
+    const t = this.qualify(schema, table);
+    if (spec.action === 'drop') {
+      return [`ALTER TABLE ${t} DROP INDEX ${this.quote(spec.name)};`];
+    }
+    const cols = spec.columns.map((c) => this.quote(c)).join(', ');
+    return [`CREATE ${spec.unique ? 'UNIQUE ' : ''}INDEX ${this.quote(spec.name)} ON ${t} (${cols});`];
+  }
+
+  buildConstraintDDL(schema, table, spec) {
+    const t = this.qualify(schema, table);
+    if (spec.action === 'drop') {
+      switch (spec.kind) {
+        // MySQL 계열은 제약 종류마다 삭제 구문이 다르다 (범용 DROP CONSTRAINT 는 최신 버전 전용).
+        case 'PRIMARY KEY': return [`ALTER TABLE ${t} DROP PRIMARY KEY;`];
+        case 'UNIQUE': return [`ALTER TABLE ${t} DROP INDEX ${this.quote(spec.name)};`];
+        case 'FOREIGN KEY': return [`ALTER TABLE ${t} DROP FOREIGN KEY ${this.quote(spec.name)};`];
+        case 'CHECK':
+          // MariaDB 는 DROP CHECK 구문이 없다.
+          return [this.isMariaDb
+            ? `ALTER TABLE ${t} DROP CONSTRAINT ${this.quote(spec.name)};`
+            : `ALTER TABLE ${t} DROP CHECK ${this.quote(spec.name)};`];
+        default: throw new Error(`지원하지 않는 제약 종류: ${spec.kind}`);
+      }
+    }
+    const cols = (spec.columns ?? []).map((c) => this.quote(c)).join(', ');
+    switch (spec.kind) {
+      case 'PRIMARY KEY': return [`ALTER TABLE ${t} ADD PRIMARY KEY (${cols});`];
+      case 'UNIQUE': return [`ALTER TABLE ${t} ADD CONSTRAINT ${this.quote(spec.name)} UNIQUE (${cols});`];
+      case 'CHECK': return [`ALTER TABLE ${t} ADD CONSTRAINT ${this.quote(spec.name)} CHECK (${spec.expression});`];
+      case 'FOREIGN KEY': {
+        const check = (v) => {
+          if (!v) return null;
+          if (!MySqlDriver.FK_ACTIONS.includes(v)) throw new Error(`지원하지 않는 FK 동작: ${v}`);
+          return v;
+        };
+        const refCols = spec.refColumns.map((c) => this.quote(c)).join(', ');
+        let sql = `ALTER TABLE ${t} ADD CONSTRAINT ${this.quote(spec.name)} FOREIGN KEY (${cols})`
+          + ` REFERENCES ${this.qualify(spec.refSchema, spec.refTable)} (${refCols})`;
+        const onUpdate = check(spec.onUpdate);
+        const onDelete = check(spec.onDelete);
+        if (onUpdate) sql += ` ON UPDATE ${onUpdate}`;
+        if (onDelete) sql += ` ON DELETE ${onDelete}`;
+        return [`${sql};`];
+      }
+      default: throw new Error(`지원하지 않는 제약 종류: ${spec.kind}`);
+    }
+  }
+
+  buildCreateTableDDL(schema, spec) {
+    const lines = spec.columns.map((c) => {
+      let s = `  ${this.quote(c.name)} ${c.dataType}`;
+      if (!c.nullable) s += ' NOT NULL';
+      if (c.autoIncrement) s += ' AUTO_INCREMENT';
+      if (c.defaultValue != null && String(c.defaultValue).trim() !== '') s += ` DEFAULT ${c.defaultValue}`;
+      if (c.comment) s += ` COMMENT ${literal(c.comment)}`;
+      return s;
+    });
+    const pk = spec.columns.filter((c) => c.primaryKey).map((c) => this.quote(c.name));
+    if (pk.length) lines.push(`  PRIMARY KEY (${pk.join(', ')})`);
+    const comment = spec.comment ? ` COMMENT=${literal(spec.comment)}` : '';
+    return [`CREATE TABLE ${this.qualify(schema, spec.name)} (\n${lines.join(',\n')}\n)${comment};`];
+  }
+
+  buildDropTableDDL(schema, table, kind) {
+    return [`DROP ${kind === 'view' ? 'VIEW' : 'TABLE'} ${this.qualify(schema, table)};`];
+  }
+
   buildColumnDDL(schema, table, spec) {
     const target = this.qualify(schema, table);
     const out = [];

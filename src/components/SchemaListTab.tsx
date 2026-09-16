@@ -42,9 +42,18 @@ export default function SchemaListTab({ tab }: { tab: SchemaTab }) {
 
   useEffect(() => {
     const handler = () => void load();
+    // 트리에서 이 스키마의 테이블을 만들거나 지우면 목록도 따라 읽는다.
+    const changed = (e: Event) => {
+      const d = (e as CustomEvent).detail as { connectionId?: string; schema?: string } | undefined;
+      if (d?.connectionId === tab.connectionId && d?.schema === tab.schema) void load();
+    };
     window.addEventListener('dbstudio:refresh', handler);
-    return () => window.removeEventListener('dbstudio:refresh', handler);
-  }, [load]);
+    window.addEventListener('dbstudio:tables-changed', changed);
+    return () => {
+      window.removeEventListener('dbstudio:refresh', handler);
+      window.removeEventListener('dbstudio:tables-changed', changed);
+    };
+  }, [load, tab.connectionId, tab.schema]);
 
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();

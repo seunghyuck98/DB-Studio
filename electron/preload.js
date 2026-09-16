@@ -48,6 +48,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   ddl: {
     preview: (id, args) => call('ddl:preview', id, args),
+    /** 인덱스·제약·테이블 DDL 문장 생성 (실행하지 않는다) */
+    build: (id, kind, args) => call('ddl:build', id, kind, args),
     execute: (id, statements) => call('ddl:execute', id, statements),
   },
   exports: {

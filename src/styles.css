@@ -392,6 +392,7 @@ body {
   padding: 18px 20px; box-shadow: 0 18px 48px rgba(0, 0, 0, .5);
 }
 .modal.narrow { width: 360px; }
+.modal.wide { width: 780px; max-width: 94vw; }
 .modal h3 { margin: 0 0 14px; font-size: 15px; }
 .modal-desc { margin: -8px 0 12px; color: var(--text-dim); font-size: 12px; }
 .form-grid { display: grid; grid-template-columns: 92px 1fr; gap: 8px 10px; align-items: center; }
@@ -954,3 +955,49 @@ body {
 .schema-list .meta-table.hoverable tbody tr { cursor: default; }
 .schema-list .meta-table.hoverable tbody tr:hover { background: #2f3237; }
 .schema-list .cell-comment { color: var(--text-dim); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- 다중 행 선택 ---- */
+.data-grid th.rownum.clickable, .data-grid td.rownum.clickable { cursor: pointer; }
+.data-grid th.rownum.clickable:hover, .data-grid td.rownum.clickable:hover { color: var(--text); background: #34373c; }
+/* 드래그 선택 중에는 글자 선택이 따라오지 않게 한다 */
+.data-grid.drag-selecting { user-select: none; }
+.data-grid.drag-selecting td { cursor: row-resize; }
+
+/* ---- 키·외래키·인덱스 편집 폼 ---- */
+.ddl-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 8px 8px;
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.ddl-form label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.ddl-form .input { width: 200px; }
+.ddl-form .input.wide { flex: 1; min-width: 320px; }
+.ddl-form-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.ddl-form-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+.col-picker { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.col-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.col-pick.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.pick-order {
+  min-width: 14px;
+  text-align: center;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+}

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import ExportButton from './ExportButton';
-import RecordView from './RecordView';
+import RecordView, { type RecordRowData } from './RecordView';
 import { getTabScratch, setTabScratch, notify, setSession, getState } from '../state/store';
 import { message } from '../state/actions';
 import type { QueryResult, TableColumn, TableTab } from '../types';
@@ -30,6 +30,13 @@ export default function DataTab({ tab }: { tab: TableTab }) {
   // 선택(한 번 클릭)과 편집(더블클릭)은 서로 다른 상태다.
   // 선택은 행 삭제 표시와 레코드(세로) 보기의 기준이 된다.
   const [selection, setSelection] = useState<CellPos | null>(null);
+  /** 선택된 기존 행들 (오름차순). 드래그·shift+클릭·전체 선택으로 여러 개가 될 수 있다. */
+  const [selectedRows, setSelectedRows] = useState<number[]>([]);
+  /** shift+클릭 범위의 기준 행 */
+  const anchorRef = useRef<number | null>(null);
+  /** 드래그 선택이 시작된 행 (마우스를 누른 채 다른 행에 들어가면 범위가 된다) */
+  const dragFromRef = useRef<number | null>(null);
+  const [dragSelecting, setDragSelecting] = useState(false);
   const [editing, setEditing] = useState<CellPos | null>(null);
   const [recordMode, setRecordMode] = useState<boolean>(() => getTabScratch(tab.id, 'recordMode', false));
   const [saving, setSaving] = useState(false);
@@ -70,6 +77,51 @@ export default function DataTab({ tab }: { tab: TableTab }) {
     });
   }, [filter]);
 
+  const range = (a: number, b: number) => {
+    const [lo, hi] = a <= b ? [a, b] : [b, a];
+    return Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
+  };
+
+  /** 기존 행을 선택한다. shift 는 기준 행부터의 범위, ctrl/⌘ 는 개별 토글. */
+  const selectRow = useCallback((rowIdx: number, col: number, e?: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
+    setSelection({ row: rowIdx, col, insert: false });
+    if (e?.shiftKey && anchorRef.current !== null) {
+      setSelectedRows(range(anchorRef.current, rowIdx));
+      return;
+    }
+    if (e && (e.metaKey || e.ctrlKey)) {
+      anchorRef.current = rowIdx;
+      setSelectedRows((prev) => (prev.includes(rowIdx)
+        ? prev.filter((r) => r !== rowIdx)
+        : [...prev, rowIdx].sort((a, b) => a - b)));
+      return;
+    }
+    anchorRef.current = rowIdx;
+    setSelectedRows([rowIdx]);
+  }, []);
+
+  /** 드래그로 범위를 늘린다 (시작 행부터 지금 행까지). */
+  const dragOverRow = useCallback((rowIdx: number, e: { buttons: number }) => {
+    if (dragFromRef.current === null) return;
+    // 네이티브 드래그(텍스트 끌기)로 빠지면 mouseup 이 안 와서 시작 상태가 남을 수 있다.
+    // 왼쪽 버튼이 눌려 있지 않으면 드래그가 아니므로 여기서 정리한다.
+    if (!(e.buttons & 1)) {
+      dragFromRef.current = null;
+      setDragSelecting(false);
+      return;
+    }
+    if (rowIdx !== dragFromRef.current) setDragSelecting(true);
+    setSelection((s) => (s ? { ...s, row: rowIdx, insert: false } : { row: rowIdx, col: 0, insert: false }));
+    setSelectedRows(range(dragFromRef.current, rowIdx));
+  }, []);
+
+  // 드래그 선택은 마우스를 놓으면 끝난다 (그리드 밖에서 놓아도).
+  useEffect(() => {
+    const up = () => { dragFromRef.current = null; setDragSelecting(false); };
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
+  }, []);
+
   useEffect(() => { setTabScratch(tab.id, 'limit', limit); }, [tab.id, limit]);
   useEffect(() => { setTabScratch(tab.id, 'offset', offset); }, [tab.id, offset]);
   useEffect(() => { setTabScratch(tab.id, 'filter', appliedFilter); }, [tab.id, appliedFilter]);
@@ -87,6 +139,10 @@ export default function DataTab({ tab }: { tab: TableTab }) {
     setInserts([]);
     setEditing(null);
     setSelection(null);
+    setSelectedRows([]);
+    anchorRef.current = null;
+    dragFromRef.current = null;
+    setDragSelecting(false);
   }, []);
 
   const load = useCallback(async (nextOffset = offset, nextFilter = appliedFilter, nextOrder = orderBy) => {
@@ -224,41 +280,44 @@ export default function DataTab({ tab }: { tab: TableTab }) {
     [cols, columns],
   );
 
-  const recordValues = useMemo<unknown[]>(() => {
-    if (!selection || !result) return [];
-    if (selection.insert) {
+  /** 세로 보기에 나란히 놓을 행들 — 선택된 기존 행 전부, 또는 새 행 하나. */
+  const recordRows = useMemo<RecordRowData[]>(() => {
+    if (!result) return [];
+    if (selection?.insert) {
       const values = inserts[selection.row] ?? {};
-      return cols.map((c) => (c.name in values ? values[c.name] : undefined));
+      return [{
+        key: `i${selection.row}`,
+        label: `새 행 ${selection.row + 1}`,
+        values: cols.map((c) => (c.name in values ? values[c.name] : undefined)),
+        editable,
+        editedColumns: new Set(cols.map((c, i) => (c.name in values ? i : -1)).filter((i) => i >= 0)),
+        unsetColumns: new Set(cols.map((c, i) => (c.name in values ? -1 : i)).filter((i) => i >= 0)),
+      }];
     }
-    const row = result.rows[selection.row];
-    if (!row) return [];
-    const rowEdits = edits[selection.row];
-    return row.map((v, i) => (rowEdits && i in rowEdits ? rowEdits[i] : v));
-  }, [selection, result, inserts, cols, edits]);
+    return selectedRows
+      .filter((r) => r < result.rows.length)
+      .map((r) => {
+        const rowEdits = edits[r];
+        return {
+          key: `r${r}`,
+          label: `행 ${offset + r + 1}`,
+          values: result.rows[r].map((v, i) => (rowEdits && i in rowEdits ? rowEdits[i] : v)),
+          editable: editable && !deleted[r],
+          editedColumns: new Set(Object.keys(rowEdits ?? {}).map(Number)),
+        };
+      });
+  }, [selection, selectedRows, result, inserts, cols, edits, deleted, editable, offset]);
 
-  const recordEditedColumns = useMemo(() => {
-    if (!selection) return new Set<number>();
-    if (selection.insert) {
-      const values = inserts[selection.row] ?? {};
-      return new Set(cols.map((c, i) => (c.name in values ? i : -1)).filter((i) => i >= 0));
-    }
-    return new Set(Object.keys(edits[selection.row] ?? {}).map(Number));
-  }, [selection, inserts, cols, edits]);
-
-  const recordUnsetColumns = useMemo(() => {
-    if (!selection?.insert) return undefined;
-    const values = inserts[selection.row] ?? {};
-    return new Set(cols.map((c, i) => (c.name in values ? -1 : i)).filter((i) => i >= 0));
-  }, [selection, inserts, cols]);
-
-  // 선택한 행이 사라지면(재조회·행 제거) 세로 보기를 닫는다.
+  // 선택한 행이 사라지면(재조회·행 제거) 선택과 세로 보기를 정리한다.
   useEffect(() => {
-    if (!selection) return;
-    const max = selection.insert ? inserts.length : rowCount;
-    if (selection.row >= max) {
+    if (selection && selection.row >= (selection.insert ? inserts.length : rowCount)) {
       setSelection(null);
       setRecordMode(false);
     }
+    setSelectedRows((prev) => {
+      const next = prev.filter((r) => r < rowCount);
+      return next.length === prev.length ? prev : next;
+    });
   }, [selection, inserts.length, rowCount]);
 
   return (
@@ -324,11 +383,11 @@ export default function DataTab({ tab }: { tab: TableTab }) {
         <button className="btn small" onClick={() => void countRows()}>행 수 세기</button>
         <button
           className={`btn small ${recordMode ? 'primary' : ''}`}
-          disabled={!selection}
-          title="선택한 행을 세로로 보기 (Tab)"
+          disabled={!selection?.insert && selectedRows.length === 0}
+          title="선택한 행(들)을 세로로 보기 (Tab)"
           onClick={() => setRecordMode((v) => !v)}
         >
-          {recordMode ? '그리드' : '세로 보기'}
+          {recordMode ? '그리드' : selectedRows.length > 1 ? `세로 보기 (${selectedRows.length})` : '세로 보기'}
         </button>
         <ExportButton
           defaultName={`${tab.schema}.${tab.table}`}
@@ -347,10 +406,14 @@ export default function DataTab({ tab }: { tab: TableTab }) {
             <button className="btn small" onClick={() => setInserts((p) => [...p, {}])}>+ 행 추가</button>
             <button
               className="btn small"
-              disabled={!selection || selection.insert}
-              onClick={() => selection && setDeleted((p) => ({ ...p, [selection.row]: true }))}
+              disabled={selectedRows.length === 0}
+              onClick={() => setDeleted((p) => {
+                const next = { ...p };
+                for (const r of selectedRows) next[r] = true;
+                return next;
+              })}
             >
-              − 행 삭제 표시
+              − 행 삭제 표시{selectedRows.length > 1 ? ` (${selectedRows.length})` : ''}
             </button>
             <button className="btn small" disabled={!dirty} onClick={resetEdits}>변경 취소</button>
             <button className="btn small primary" disabled={!dirty || saving} onClick={() => void save()}>
@@ -370,47 +433,63 @@ export default function DataTab({ tab }: { tab: TableTab }) {
       {loading && <div className="pane-message">조회 중…</div>}
       {error && <div className="pane-message error">{error}</div>}
 
-      {result && !loading && recordMode && selection && (
+      {result && !loading && recordMode && recordRows.length > 0 && (
         <RecordView
           columns={recordColumns}
-          values={recordValues}
-          rowNumber={selection.insert ? selection.row + 1 : selection.row + 1}
-          totalRows={selection.insert ? inserts.length : rowCount}
-          onPrev={() => setSelection((s) => (s ? { ...s, row: Math.max(0, s.row - 1) } : s))}
-          onNext={() => setSelection((s) => {
-            if (!s) return s;
-            const max = (s.insert ? inserts.length : rowCount) - 1;
-            return { ...s, row: Math.min(max, s.row + 1) };
-          })}
+          rows={recordRows}
+          rowNumber={(selection?.insert ? selection.row : selectedRows[0] ?? 0) + 1}
+          totalRows={selection?.insert ? inserts.length : rowCount}
+          onPrev={() => {
+            // 단일 행에서만 쓰인다 — 선택을 통째로 한 줄 위로 옮긴다.
+            if (selection?.insert) { setSelection((s) => (s ? { ...s, row: Math.max(0, s.row - 1) } : s)); return; }
+            const r = Math.max(0, (selectedRows[0] ?? 0) - 1);
+            anchorRef.current = r;
+            setSelectedRows([r]);
+            setSelection((s) => ({ row: r, col: s?.col ?? 0, insert: false }));
+          }}
+          onNext={() => {
+            if (selection?.insert) { setSelection((s) => (s ? { ...s, row: Math.min(inserts.length - 1, s.row + 1) } : s)); return; }
+            const r = Math.min(rowCount - 1, (selectedRows[0] ?? 0) + 1);
+            anchorRef.current = r;
+            setSelectedRows([r]);
+            setSelection((s) => ({ row: r, col: s?.col ?? 0, insert: false }));
+          }}
           onExitRecordMode={() => setRecordMode(false)}
-          editable={editable && !(selection && !selection.insert && deleted[selection.row])}
-          editedColumns={recordEditedColumns}
-          unsetColumns={recordUnsetColumns}
-          onCommit={(colIdx, raw, isNull) => {
-            if (!selection) return;
-            if (selection.insert) setInsertCell(selection.row, cols[colIdx].name, raw, isNull);
-            else setCell(selection.row, colIdx, raw, isNull);
+          onCommit={(rowKey, colIdx, raw, isNull) => {
+            const idx = Number(rowKey.slice(1));
+            if (rowKey.startsWith('i')) setInsertCell(idx, cols[colIdx].name, raw, isNull);
+            else setCell(idx, colIdx, raw, isNull);
           }}
         />
       )}
 
-      {result && !loading && !(recordMode && selection) && (
+      {result && !loading && !(recordMode && recordRows.length > 0) && (
         <div
           className="grid-scroll"
           ref={gridRef}
           tabIndex={0}
           onKeyDown={(e) => {
             // Tab 은 원래 포커스를 옮기지만, 그리드에서는 세로 보기 전환으로 쓴다 (DBeaver 와 동일).
-            if (e.key === 'Tab' && !editing && selection) {
+            if (e.key === 'Tab' && !editing && (selectedRows.length > 0 || selection?.insert)) {
               e.preventDefault();
               setRecordMode(true);
             }
           }}
         >
-          <table className="data-grid">
+          <table className={`data-grid ${dragSelecting ? 'drag-selecting' : ''}`}>
             <thead>
               <tr>
-                <th className="rownum" />
+                <th
+                  className="rownum clickable"
+                  title="전체 행 선택"
+                  onClick={() => {
+                    if (rowCount === 0) return;
+                    anchorRef.current = 0;
+                    setSelectedRows(Array.from({ length: rowCount }, (_, i) => i));
+                    setSelection({ row: 0, col: 0, insert: false });
+                    gridRef.current?.focus();
+                  }}
+                >⊞</th>
                 {cols.map((c) => {
                   const meta = columns.find((m) => m.name === c.name);
                   return (
@@ -430,10 +509,22 @@ export default function DataTab({ tab }: { tab: TableTab }) {
             </thead>
             <tbody>
               {result.rows.map((row, rowIdx) => {
-                const rowSelected = selection && !selection.insert && selection.row === rowIdx;
+                const rowSelected = selectedRows.includes(rowIdx);
                 return (
-                  <tr key={rowIdx} className={`${deleted[rowIdx] ? 'deleted' : ''} ${rowSelected ? 'row-selected' : ''}`}>
-                    <td className="rownum">{offset + rowIdx + 1}</td>
+                  <tr
+                    key={rowIdx}
+                    className={`${deleted[rowIdx] ? 'deleted' : ''} ${rowSelected ? 'row-selected' : ''}`}
+                    onMouseEnter={(e) => dragOverRow(rowIdx, e)}
+                  >
+                    <td
+                      className="rownum clickable"
+                      onMouseDown={(e) => {
+                        if (e.button !== 0) return;
+                        selectRow(rowIdx, 0, e);
+                        if (!e.shiftKey && !e.metaKey && !e.ctrlKey) dragFromRef.current = rowIdx;
+                        gridRef.current?.focus();
+                      }}
+                    >{offset + rowIdx + 1}</td>
                     {row.map((value, colIdx) => {
                       const edited = edits[rowIdx] && colIdx in edits[rowIdx];
                       const shown = edited ? edits[rowIdx][colIdx] : value;
@@ -444,10 +535,15 @@ export default function DataTab({ tab }: { tab: TableTab }) {
                           key={colIdx}
                           value={shown}
                           edited={!!edited}
-                          selected={!!rowSelected && selection?.col === colIdx}
+                          selected={!!rowSelected && selection?.row === rowIdx && selection?.col === colIdx}
                           editable={editable && !deleted[rowIdx]}
                           editing={isEditing}
-                          onSelect={() => { setSelection(pos); gridRef.current?.focus(); }}
+                          onSelect={(e) => {
+                            selectRow(rowIdx, colIdx, e);
+                            // 수정키 없는 보통 클릭이면 드래그 범위 선택을 시작할 수 있다.
+                            if (!e.shiftKey && !e.metaKey && !e.ctrlKey) dragFromRef.current = rowIdx;
+                            gridRef.current?.focus();
+                          }}
                           onStartEdit={() => { setSelection(pos); setEditing(pos); }}
                           onCommit={(raw, isNull) => { setCell(rowIdx, colIdx, raw, isNull); setEditing(null); }}
                           onCancel={() => setEditing(null)}
@@ -479,7 +575,12 @@ export default function DataTab({ tab }: { tab: TableTab }) {
                           selected={!!rowSelected && selection?.col === colIdx}
                           editable
                           editing={isEditing}
-                          onSelect={() => { setSelection(pos); gridRef.current?.focus(); }}
+                          onSelect={() => {
+                            setSelection(pos);
+                            setSelectedRows([]);
+                            anchorRef.current = null;
+                            gridRef.current?.focus();
+                          }}
                           onStartEdit={() => { setSelection(pos); setEditing(pos); }}
                           onCommit={(raw, isNull) => { setInsertCell(insertIdx, c.name, raw, isNull); setEditing(null); }}
                           onCancel={() => setEditing(null)}
@@ -504,7 +605,7 @@ interface CellProps {
   selected?: boolean;
   editable: boolean;
   editing: boolean;
-  onSelect: () => void;
+  onSelect: (e: ReactMouseEvent) => void;
   onStartEdit: () => void;
   onCommit: (raw: string, isNull: boolean) => void;
   onCancel: () => void;
@@ -544,7 +645,7 @@ function Cell({ value, edited, selected, editable, editing, onSelect, onStartEdi
   return (
     <td
       className={`${edited ? 'edited' : ''} ${isNull ? 'null' : ''} ${selected ? 'cell-selected' : ''}`}
-      onClick={onSelect}
+      onMouseDown={(e) => { if (e.button === 0) onSelect(e); }}
       onDoubleClick={() => editable && onStartEdit()}
       title={isNull ? 'NULL' : String(value ?? '')}
     >
