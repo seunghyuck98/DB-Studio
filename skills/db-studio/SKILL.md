@@ -15,6 +15,14 @@ description: DB Studio 안에서 자연어로 데이터베이스를 조회·분�
 - DB 접근은 **`emr-db` MCP 서버**(`mysql_query` 도구)로만 한다. 다른 경로로 접속하려 하지 마라.
 - 먼저 구조를 파악하고(테이블 목록·컬럼·인덱스·제약), 그 다음에 데이터를 조회한다.
 - 스키마를 모르면 추측하지 말고 `information_schema` / `SHOW` 로 실제 구조를 확인한 뒤 쿼리를 짠다.
+- **테이블·컬럼을 "찾는" 것도 전부 SQL 로 한다.** 파일 검색(Glob/Grep) 같은 도구는 여기에 없고,
+  있어도 쓸모가 없다 — 작업 폴더에는 소스 코드가 없다. 예:
+  - 이름·주석으로 테이블 찾기:
+    `SELECT TABLE_NAME, TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME LIKE '%form%' OR TABLE_COMMENT LIKE '%서식%')`
+  - 컬럼 이름·주석으로 찾기:
+    `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_COMMENT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND (COLUMN_NAME LIKE '%form%' OR COLUMN_COMMENT LIKE '%서식%')`
+  - 구조 확인: `SHOW CREATE TABLE \`t\``, `SHOW INDEX FROM \`t\``
+  한국어 요청은 영문 약어(예: 서식→form/frm/template, 목록→list/master)와 주석(`*_COMMENT`)을 함께 검색한다.
 
 ## 쿼리 작성 규칙 (반드시 지킨다)
 

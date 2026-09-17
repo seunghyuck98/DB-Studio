@@ -245,7 +245,12 @@ async function ask(req, onEvent) {
         // 넣으면 canUseTool 보다 먼저 통과돼 쓰기 SQL 가드가 무력화된다.
         // 여기 없는 도구는 canUseTool 로 흘러가 SQL 을 검사받는다.
         allowedTools: ['TodoWrite'],
-        disallowedTools: ['Bash', 'Read', 'Write', 'Edit', 'WebFetch', 'WebSearch'],
+        // 파일·셸·웹·하위 에이전트는 이 사이드바에서 쓸 일이 없다. 특히 Glob/Grep/Agent 를
+        // 열어 두면 "○○ 테이블 찾아줘" 를 빈 작업 폴더에서 파일 검색으로 풀려다 턴만 태운다.
+        disallowedTools: [
+          'Bash', 'Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
+          'Glob', 'Grep', 'LS', 'Agent', 'Task', 'WebFetch', 'WebSearch',
+        ],
         // 사용자 설정(~/.claude/settings.json)을 읽는다. 여기에 정의된 훅과 OTEL
         // 텔레메트리로 Litmus 가 이 대화까지 수집한다. 프로젝트·로컬 설정은 끌어오지 않는다.
         // (permissions 가 비어 있어 아래 읽기 전용 canUseTool 가드는 가려지지 않는다.)

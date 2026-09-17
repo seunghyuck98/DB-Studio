@@ -12,7 +12,7 @@ import {
   openTableTab,
 } from '../state/store';
 import { setSplitOnBlankLine, message, connect } from '../state/actions';
-import type { SqlContext } from '../state/chat';
+import { SQL_APPLIED_EVENT, type SqlContext } from '../state/chat';
 import { scheduleWorkspaceSave } from '../state/workspace';
 import { statementAt } from '../lib/sqlparse';
 import { tableLink, type LinkPart } from '../lib/tablelink';
@@ -220,6 +220,25 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
   const askContext: SqlContext | null = offline
     ? null
     : { connectionId: tab.connectionId, database: tab.database || session?.currentDatabase || '', schema: tab.schema || session?.currentSchema || '' };
+
+  // Claude 답변의 '즉시 적용' — 스크래치에 들어온 새 본문을 편집기에 반영하고 끝으로 스크롤한다.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      if ((e as CustomEvent<{ tabId: string }>).detail?.tabId !== tab.id) return;
+      const next = getTabScratch<string>(tab.id, 'sql', '');
+      setText(next);
+      // value 반영은 다음 렌더 뒤에 일어나므로 한 틱 늦춰 커서를 문서 끝으로 보낸다.
+      setTimeout(() => {
+        const view = viewRef.current;
+        if (!view) return;
+        const end = view.state.doc.length;
+        view.dispatch({ selection: { anchor: end }, scrollIntoView: true });
+        view.focus();
+      }, 0);
+    };
+    window.addEventListener(SQL_APPLIED_EVENT, handler);
+    return () => window.removeEventListener(SQL_APPLIED_EVENT, handler);
+  }, [tab.id]);
 
   // 메뉴의 '실행 계획' 명령 처리
   useEffect(() => {

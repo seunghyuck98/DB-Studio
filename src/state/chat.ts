@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from 'react';
 import {
   getState, setState, notify, activeConnectionId, activeTab, sessionOf, connectionOf, openSqlTab,
+  sqlTabs, paneActiveId, setActiveTab, getTabScratch, setTabScratch,
 } from './store';
+import { scheduleWorkspaceSave } from './workspace';
 import type { AgentEvent } from '../types';
 
 /**
@@ -177,7 +179,8 @@ export function sendPrompt(prompt: string, convId: string | null = state.activeI
         patchLastMessage(id, (m) => ({ ...m, text: m.text + ev.text }));
         break;
       case 'tool':
-        if (ev.name && !ev.name.startsWith('ToolSearch')) {
+        // DB 도구(MCP)만 보여 준다. ToolSearch 나 내부 도구 호출은 답에 필요한 정보가 아니다.
+        if (ev.name && ev.name.startsWith('mcp__')) {
           patchLastMessage(id, (m) => ({ ...m, tools: [...(m.tools ?? []), { name: ev.name, input: ev.input ?? '' }] }));
         }
         break;
@@ -258,11 +261,43 @@ export function askAboutSql(req: { sql: string; question: string; context: SqlCo
   sendPrompt(lines.join('\n'), id);
 }
 
+/** SqlEditor 가 듣는 이벤트 — 스크래치에 넣어 둔 새 본문을 화면에 반영하라는 신호 */
+export const SQL_APPLIED_EVENT = 'dbstudio:sql-applied';
+
 /**
- * 답변의 쿼리를 새 SQL 편집기로 보낸다 — 지금 연결된 접속·스키마로 열고,
- * 그게 없으면 대화가 시작된 맥락으로 되돌아간다.
+ * 쿼리를 넣을 SQL 편집기를 고른다: 보고 있는 화면의 활성 SQL 탭 → 다른 화면의 활성 SQL 탭
+ * → 열려 있는 아무 SQL 탭(마지막 것). 없으면 null.
  */
-export function applySqlToEditor(sql: string, conv: Conversation | null): boolean {
+function targetSqlTab() {
+  const s = getState();
+  const tabs = sqlTabs(s);
+  if (!tabs.length) return null;
+  const focused = tabs.find((t) => t.id === paneActiveId(s, s.focusedPane));
+  if (focused) return focused;
+  const other = tabs.find((t) => t.id === paneActiveId(s, s.focusedPane === 0 ? 1 : 0));
+  return other ?? tabs[tabs.length - 1];
+}
+
+/**
+ * 답변의 쿼리를 SQL 편집기에 넣는다.
+ * 열려 있는 SQL 편집기가 있으면 그 편집기 끝에 이어 붙이고(기존 내용은 지우지 않는다),
+ * 없으면 지금 연결된 접속·스키마로 새 편집기를 열어 넣는다. 접속도 없으면 대화가 시작된
+ * 맥락으로, 그것도 없으면 안내만 한다.
+ */
+export function applySqlToEditor(sql: string, conv: Conversation | null): 'appended' | 'opened' | false {
+  const body = sql.trim();
+  const existing = targetSqlTab();
+  if (existing) {
+    const prev = getTabScratch<string>(existing.id, 'sql', '');
+    const sep = prev.trim() ? (prev.endsWith('\n') ? '\n' : '\n\n') : '';
+    setTabScratch(existing.id, 'sql', prev + sep + body + '\n');
+    setActiveTab(existing.id);
+    scheduleWorkspaceSave();
+    // 편집기가 화면에 붙어 있으면 새 본문을 읽어 가고, 아니면 붙을 때 스크래치에서 읽는다.
+    window.dispatchEvent(new CustomEvent(SQL_APPLIED_EVENT, { detail: { tabId: existing.id } }));
+    return 'appended';
+  }
+
   const s = getState();
   let ctx = currentSqlContext();
   if (!ctx && conv?.context && sessionOf(conv.context.connectionId, s)?.connected) ctx = conv.context;
@@ -270,6 +305,6 @@ export function applySqlToEditor(sql: string, conv: Conversation | null): boolea
     notify('info', '열려 있는 접속이 없어 편집기를 만들 수 없습니다. 먼저 접속하세요.');
     return false;
   }
-  openSqlTab(ctx.connectionId, ctx.database, ctx.schema, sql.trim() + '\n');
-  return true;
+  openSqlTab(ctx.connectionId, ctx.database, ctx.schema, body + '\n');
+  return 'opened';
 }
