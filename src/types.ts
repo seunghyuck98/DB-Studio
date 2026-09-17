@@ -338,6 +338,7 @@ export type AgentEvent =
   | { type: 'session'; sessionId: string }
   | { type: 'delta'; text: string }
   | { type: 'tool'; name: string; input: string }
+  | { type: 'mcp'; configured: boolean; emrStatus: string }
   | { type: 'result'; text: string; isError: boolean; subtype: string; usage: unknown }
   | { type: 'error'; message: string }
   | { type: 'done' };

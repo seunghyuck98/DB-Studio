@@ -89,6 +89,35 @@ function claudeExecutable() {
   return 'claude';
 }
 
+/** node 18+ 실행 파일이 있는 bin 디렉터리 (Finder 실행 시 PATH 에 nvm 이 없어 필요). */
+function nodeBinDir() {
+  const claude = claudeExecutable();
+  if (claude && claude !== 'claude' && fs.existsSync(claude)) return path.dirname(claude);
+  for (const p of ['/opt/homebrew/bin', '/usr/local/bin']) {
+    if (fs.existsSync(path.join(p, 'node'))) return p;
+  }
+  return null;
+}
+
+/**
+ * SDK 하위 프로세스(claude CLI 와 그것이 띄우는 MCP 서버)가 쓸 환경.
+ * SDK 의 env 는 프로세스 환경을 통째로 대체하므로, Finder 로 실행돼 빈약해진 PATH 에
+ * node·homebrew·시스템 경로를 앞에 붙여 준다. 안 그러면 executable:'node' 도,
+ * emr-db run.sh 도 실행 파일을 못 찾아 MCP 연결이 닫힌다.
+ */
+function richEnv(extra) {
+  const dirs = [
+    nodeBinDir(),
+    '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin',
+  ].filter(Boolean);
+  const seen = new Set();
+  const parts = [];
+  for (const d of [...dirs, ...String(process.env.PATH || '').split(path.delimiter)]) {
+    if (d && !seen.has(d)) { seen.add(d); parts.push(d); }
+  }
+  return { ...process.env, ...extra, PATH: parts.join(path.delimiter) };
+}
+
 /**
  * MCP 로 나가는 SQL 이 순수 조회인지 검사한다.
  * 여러 문장·주석을 걷어내고 첫 키워드가 조회 계열인지 본다. 하나라도 쓰기면 막는다.
@@ -140,12 +169,19 @@ async function ask(req, onEvent) {
 
   const emr = emrDbServer();
   const mcpServers = {};
-  if (emr) mcpServers['emr-db'] = { type: 'stdio', command: emr.command, args: emr.args, env: emr.env };
+  if (emr) {
+    mcpServers['emr-db'] = {
+      type: 'stdio',
+      command: emr.command,
+      args: emr.args,
+      env: richEnv(emr.env || {}),
+    };
+  }
 
   // 구독 로그인이 있으면 API 키가 없어도 된다. 키가 오면 그걸 우선 쓴다.
-  const env = { ...process.env };
-  if (req.apiKey) env.ANTHROPIC_API_KEY = req.apiKey;
-  env.CLAUDE_AGENT_SDK_CLIENT_APP = 'db-studio/1.0';
+  const extra = { CLAUDE_AGENT_SDK_CLIENT_APP: 'db-studio/1.0' };
+  if (req.apiKey) extra.ANTHROPIC_API_KEY = req.apiKey;
+  const env = richEnv(extra);
 
   try { fs.mkdirSync(AGENT_CWD, { recursive: true }); } catch (_) { /* 무시 */ }
 
@@ -204,7 +240,16 @@ async function ask(req, onEvent) {
 function relay(msg, onEvent) {
   switch (msg.type) {
     case 'system':
-      if (msg.subtype === 'init') onEvent({ type: 'session', sessionId: msg.session_id });
+      if (msg.subtype === 'init') {
+        onEvent({ type: 'session', sessionId: msg.session_id });
+        const servers = Array.isArray(msg.mcp_servers) ? msg.mcp_servers : [];
+        const emr = servers.find((x) => /emr[-_]?db/i.test(x.name || ''));
+        onEvent({
+          type: 'mcp',
+          configured: servers.length > 0,
+          emrStatus: emr ? emr.status : (servers.length ? 'absent' : 'none'),
+        });
+      }
       break;
     case 'stream_event': {
       // 부분 응답 — 텍스트 델타만 흘려보낸다.

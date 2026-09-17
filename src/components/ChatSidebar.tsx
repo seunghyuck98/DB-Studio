@@ -25,6 +25,7 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
   const [ready, setReady] = useState<{ hasEmrDb: boolean } | null>(null);
+  const [mcpDown, setMcpDown] = useState(false);
   const sessionRef = useRef<string | undefined>(undefined);
   const runIdRef = useRef<string | null>(null);
   const disposeRef = useRef<(() => void) | null>(null);
@@ -68,6 +69,19 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
             patchLast((msg) => ({ ...msg, tools: [...(msg.tools ?? []), { name: ev.name, input: ev.input ?? '' }] }));
           }
           break;
+        case 'mcp': {
+          const down = ev.emrStatus !== 'connected';
+          setMcpDown(down);
+          if (down) {
+            patchLast((msg) => ({
+              ...msg,
+              error: true,
+              text: `⚠ emr-db MCP 서버에 연결하지 못했습니다 (상태: ${ev.emrStatus}). `
+                + '데이터베이스 직접 조회가 불가능합니다. VPN 연결과 emr-db MCP 설정(run.sh)을 확인하세요.',
+            }));
+          }
+          break;
+        }
         case 'result':
           // 스트리밍 델타가 비어 있었으면(부분 응답 미지원) 최종 텍스트로 채운다.
           if (ev.text) patchLast((msg) => (msg.text ? msg : { ...msg, text: ev.text }));
@@ -122,7 +136,8 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
       />
       <div className="chat-head">
         <b>Claude · DB 도우미</b>
-        {ready && !ready.hasEmrDb && <span className="chat-warn" title="emr-db MCP 설정을 찾지 못했습니다">DB 미연결</span>}
+        {ready && !ready.hasEmrDb && <span className="chat-warn" title="emr-db MCP 설정을 찾지 못했습니다">설정 없음</span>}
+        {ready && ready.hasEmrDb && mcpDown && <span className="chat-warn" title="emr-db MCP 서버에 연결하지 못했습니다">DB 연결 실패</span>}
         <div className="spacer" />
         <button className="icon-btn" title="새 대화" onClick={reset} disabled={!messages.length}>⟲</button>
         <button className="icon-btn" aria-label="닫기" onClick={onClose}>×</button>
