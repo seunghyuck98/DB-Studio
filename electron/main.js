@@ -18,6 +18,7 @@ const db = require('./db');
 const store = require('./store');
 const exporter = require('./export');
 const history = require('./history');
+const chatHistory = require('./chathistory');
 const settings = require('./settings');
 const workspace = require('./workspace');
 const usage = require('./usage');
@@ -129,6 +130,7 @@ function buildMenu() {
       submenu: [
         { label: '새로 고침', accelerator: 'F5', click: send('menu:refresh') },
         { label: '쿼리 히스토리', accelerator: 'CmdOrCtrl+Shift+H', click: send('menu:history') },
+        { label: 'Claude 대화 히스토리', accelerator: 'CmdOrCtrl+Shift+J', click: send('menu:chat-history') },
         { label: 'SQL 편집기 목록', accelerator: 'CmdOrCtrl+Shift+L', click: send('menu:sql-list') },
         { label: '실행 계획', accelerator: 'CmdOrCtrl+Shift+E', click: send('menu:explain') },
         { type: 'separator' },
@@ -213,6 +215,12 @@ ipcMain.on('workspace:flush', (event, snapshot) => {
 handle('history:list', (query) => history.list(query));
 handle('history:clear', () => history.clear());
 
+handle('chat-history:list', (query) => chatHistory.list(query));
+handle('chat-history:get', (id) => chatHistory.get(id));
+handle('chat-history:save', (conv) => chatHistory.save(conv));
+handle('chat-history:remove', (id) => chatHistory.remove(id));
+handle('chat-history:clear', () => chatHistory.clear());
+
 handle('tx:autoCommit', (id, value) => db.setAutoCommit(id, value));
 handle('tx:pending', (id) => db.pendingTx(id));
 handle('tx:commit', (id) => db.commit(id));
@@ -239,10 +247,12 @@ app.whenReady().then(() => {
 app.on('window-all-closed', async () => {
   await db.closeAll();
   history.flush();
+  chatHistory.flush();
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', async () => {
   await db.closeAll();
   history.flush();
+  chatHistory.flush();
 });

@@ -9,12 +9,13 @@ export default function Breadcrumb({ tab }: { tab: Tab | null }) {
   const state = useAppState();
   if (!tab) return null;
 
-  // 히스토리·변경 내역 탭은 특정 객체에 묶이지 않으므로 제목만 보여준다.
-  if (tab.kind === 'history' || tab.kind === 'tx') {
+  // 히스토리·변경 내역·대화 히스토리 탭은 특정 객체에 묶이지 않으므로 제목만 보여준다.
+  if (tab.kind === 'history' || tab.kind === 'tx' || tab.kind === 'chatHistory') {
+    const icon = tab.kind === 'tx' ? 'tx' : tab.kind === 'chatHistory' ? 'chat' : 'history';
     return (
       <nav className="breadcrumb" aria-label="현재 위치">
         <span className="crumb">
-          <span className={`icon icon-${tab.kind === 'tx' ? 'tx' : 'history'}`} aria-hidden />
+          <span className={`icon icon-${icon}`} aria-hidden />
           <span className="crumb-label">{tab.title}</span>
         </span>
       </nav>

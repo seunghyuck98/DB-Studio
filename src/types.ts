@@ -260,7 +260,7 @@ export interface ColumnChangeSpec {
   tableComment?: string | null;
 }
 
-export type TabKind = 'table' | 'sql' | 'history' | 'tx' | 'schema';
+export type TabKind = 'table' | 'sql' | 'history' | 'tx' | 'schema' | 'chatHistory';
 
 export interface TableTab {
   id: string;
@@ -297,6 +297,45 @@ export interface HistoryTab {
   title: string;
 }
 
+/** Claude 대화 히스토리 탭 (하나만) — 어떤 접속에도 묶이지 않는다 */
+export interface ChatHistoryTab {
+  id: string;
+  pane?: 0 | 1;
+  kind: 'chatHistory';
+  connectionId: string;
+  database: string;
+  schema: string;
+  title: string;
+}
+
+/** 저장된 Claude 대화 (electron/chathistory.js 가 정제한 모양) */
+export interface SavedChatMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  tools?: { name: string; input: string }[];
+  error?: boolean;
+}
+
+export interface SavedConversation {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  sessionId?: string | null;
+  context?: { connectionId: string; database: string; schema: string } | null;
+  messages: SavedChatMessage[];
+}
+
+export interface ChatHistorySummary {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+  preview: string;
+  context?: { connectionId: string; database: string; schema: string } | null;
+}
+
 /** 진행 중인 트랜잭션의 변경 내역 탭 (접속별로 하나) */
 export interface TxTab {
   id: string;
@@ -321,7 +360,7 @@ export interface SchemaTab {
   title: string;
 }
 
-export type Tab = TableTab | SqlTab | HistoryTab | TxTab | SchemaTab;
+export type Tab = TableTab | SqlTab | HistoryTab | TxTab | SchemaTab | ChatHistoryTab;
 
 export interface UsageTotals {
   input: number;
@@ -465,6 +504,13 @@ declare global {
       history: {
         list(query?: { search?: string; connectionId?: string; onlyErrors?: boolean; limit?: number; offset?: number }):
           Promise<{ total: number; entries: HistoryEntry[] }>;
+        clear(): Promise<boolean>;
+      };
+      chatHistory: {
+        list(query?: { search?: string; limit?: number }): Promise<{ total: number; entries: ChatHistorySummary[] }>;
+        get(id: string): Promise<SavedConversation | null>;
+        save(conv: SavedConversation): Promise<boolean>;
+        remove(id: string): Promise<boolean>;
         clear(): Promise<boolean>;
       };
       tx: {

@@ -6,6 +6,7 @@ import Breadcrumb from './components/Breadcrumb';
 import TableEditor from './components/TableEditor';
 import SqlEditor from './components/SqlEditor';
 import HistoryTab, { openHistoryTab } from './components/HistoryTab';
+import ChatHistoryTab, { openChatHistoryTab } from './components/ChatHistoryTab';
 import TxTab from './components/TxTab';
 import SchemaListTab from './components/SchemaListTab';
 import SqlEditorList from './components/SqlEditorList';
@@ -65,6 +66,9 @@ export default function App() {
           break;
         case 'menu:history':
           openHistoryTab();
+          break;
+        case 'menu:chat-history':
+          openChatHistoryTab();
           break;
         case 'menu:sql-list':
           setState((prev) => ({ sqlListOpen: !prev.sqlListOpen }));
@@ -175,6 +179,7 @@ function EditorPane({ pane, state }: { pane: 0 | 1; state: AppState }) {
         {active?.kind === 'history' && <HistoryTab key={active.id} tab={active} />}
         {active?.kind === 'tx' && <TxTab key={active.id} tab={active} />}
         {active?.kind === 'schema' && <SchemaListTab key={active.id} tab={active} />}
+        {active?.kind === 'chatHistory' && <ChatHistoryTab key={active.id} tab={active} />}
         {dropHint && <div className={`split-hint ${dropHint}`} />}
       </div>
     </section>

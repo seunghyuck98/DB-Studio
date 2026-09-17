@@ -4,7 +4,10 @@ import {
   sqlTabs, paneActiveId, setActiveTab, getTabScratch, setTabScratch,
 } from './store';
 import { scheduleWorkspaceSave } from './workspace';
-import type { AgentEvent } from '../types';
+import type { AgentEvent, SavedConversation } from '../types';
+
+/** 히스토리 탭이 듣는 이벤트 — 저장된 대화가 바뀌었으니 목록을 다시 읽으라는 신호 */
+export const CHAT_HISTORY_CHANGED_EVENT = 'dbstudio:chat-history-changed';
 
 /**
  * Claude 대화 상태. 사이드바 컴포넌트 밖(모듈)에 두는 이유:
@@ -39,6 +42,8 @@ export interface Conversation {
   runId: string | null;
   mcpDown: boolean;
   context?: SqlContext;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface AgentInfo {
@@ -112,10 +117,11 @@ export async function loadAgentInfo(): Promise<void> {
   }
 }
 
-/** 새 대화를 만들고 활성화한다. */
+/** 새 대화를 만들고 활성화한다. id 는 재시작 뒤 되살린 대화와 겹치지 않게 시각을 섞는다. */
 export function newConversation(opts: { title?: string; context?: SqlContext } = {}): string {
   convSeq += 1;
-  const id = `conv-${convSeq}`;
+  const now = Date.now();
+  const id = `conv-${now.toString(36)}-${convSeq}`;
   const conv: Conversation = {
     id,
     title: opts.title ?? '새 대화',
@@ -124,9 +130,57 @@ export function newConversation(opts: { title?: string; context?: SqlContext } =
     runId: null,
     mcpDown: false,
     context: opts.context,
+    createdAt: now,
+    updatedAt: now,
   };
   emit({ ...state, conversations: [...state.conversations, conv], activeId: id });
   return id;
+}
+
+/** 대화를 히스토리 파일에 남긴다 (발화 직후·응답 완료 때). 빈 대화는 남기지 않는다. */
+function persist(id: string): void {
+  const c = state.conversations.find((x) => x.id === id);
+  if (!c || !c.messages.length || !window.api?.chatHistory) return;
+  const saved: SavedConversation = {
+    id: c.id,
+    title: c.title,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    sessionId: c.sessionId ?? null,
+    context: c.context ?? null,
+    messages: c.messages.map((m) => ({
+      role: m.role, text: m.text, ...(m.tools?.length ? { tools: m.tools } : {}), ...(m.error ? { error: true } : {}),
+    })),
+  };
+  window.api.chatHistory.save(saved)
+    .then(() => window.dispatchEvent(new CustomEvent(CHAT_HISTORY_CHANGED_EVENT)))
+    .catch(() => { /* 저장 실패로 대화를 막지 않는다 */ });
+}
+
+/**
+ * 히스토리에서 고른 대화를 사이드바에 다시 연다. 이미 열려 있으면 그 탭으로 간다.
+ * 세션 id 도 같이 되살려, 이어서 물으면 이전 맥락을 기억한다(에이전트 세션 파일이 남아 있는 한).
+ */
+export function openSavedConversation(saved: SavedConversation): void {
+  const existing = state.conversations.find((c) => c.id === saved.id);
+  if (!existing) {
+    const conv: Conversation = {
+      id: saved.id,
+      title: saved.title,
+      messages: saved.messages.map((m) => ({ role: m.role, text: m.text, tools: m.tools ?? [], error: m.error })),
+      sessionId: saved.sessionId ?? undefined,
+      running: false,
+      runId: null,
+      mcpDown: false,
+      context: saved.context ?? undefined,
+      createdAt: saved.createdAt,
+      updatedAt: saved.updatedAt,
+    };
+    emit({ ...state, conversations: [...state.conversations, conv], activeId: conv.id });
+  } else {
+    emit({ ...state, activeId: saved.id });
+  }
+  setState({ chatOpen: true });
 }
 
 export function activateConversation(id: string): void {
@@ -168,7 +222,9 @@ export function sendPrompt(prompt: string, convId: string | null = state.activeI
     messages: [...c.messages, { role: 'user', text }, { role: 'assistant', text: '', tools: [] }],
     running: true,
     runId,
+    updatedAt: Date.now(),
   }));
+  persist(id);
 
   const dispose = window.api.agent.ask({ runId, prompt: text, resume: conv.sessionId }, (ev: AgentEvent) => {
     switch (ev.type) {
@@ -204,13 +260,23 @@ export function sendPrompt(prompt: string, convId: string | null = state.activeI
         if (ev.text) patchLastMessage(id, (m) => (m.text ? m : { ...m, text: ev.text }));
         if (ev.isError) patchLastMessage(id, (m) => ({ ...m, error: true, text: m.text || '요청을 처리하지 못했습니다.' }));
         break;
-      case 'error':
-        patchLastMessage(id, (m) => ({ ...m, error: true, text: m.text + (m.text ? '\n\n' : '') + `⚠ ${ev.message}` }));
+      case 'error': {
+        // 되살린 대화의 에이전트 세션이 사라졌으면(세션 파일 정리 등) 다음 발화는 새 세션으로 간다.
+        const lostSession = !!conv.sessionId && /no conversation found|session.*not found|could not resume/i.test(ev.message);
+        if (lostSession) patchConversation(id, (c) => ({ ...c, sessionId: undefined }));
+        patchLastMessage(id, (m) => ({
+          ...m,
+          error: true,
+          text: m.text + (m.text ? '\n\n' : '') + `⚠ ${ev.message}`
+            + (lostSession ? '\n이전 세션을 찾지 못해 다음 질문부터는 새 세션으로 이어 갑니다. 같은 내용을 다시 보내 주세요.' : ''),
+        }));
         break;
+      }
       case 'done':
-        patchConversation(id, (c) => ({ ...c, running: false, runId: null }));
+        patchConversation(id, (c) => ({ ...c, running: false, runId: null, updatedAt: Date.now() }));
         disposers.get(id)?.();
         disposers.delete(id);
+        persist(id);
         break;
       default:
         break;

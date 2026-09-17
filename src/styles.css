@@ -109,6 +109,8 @@ body {
 .icon-sql::before { content: 'Q'; }
 .icon-history { background: #8b5cf6; }
 .icon-history::before { content: 'H'; }
+.icon-chat { background: #0ea5e9; }
+.icon-chat::before { content: 'C'; }
 
 /* ---- 상단 툴바 ------------------------------------------------------------ */
 
@@ -1130,6 +1132,17 @@ body {
   color: var(--text);
 }
 .btn.tiny { padding: 1px 7px; font-size: 11px; line-height: 1.5; }
+
+/* 대화 히스토리 탭 — 아래 상세 영역에 대화 전체를 사이드바와 같은 모양으로 */
+.chat-history-detail { display: flex; flex-direction: column; min-height: 0; flex: 1 1 40%; }
+.chat-history-title { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.chat-history-messages {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 10px; max-width: 900px;
+  user-select: text; cursor: text;
+}
+.chat-history-messages button { user-select: none; cursor: pointer; }
 
 /* AI 질문 다이얼로그 */
 .ask-ai-sql { max-height: 180px; overflow: auto; margin: 0 0 10px; font-size: 12px; }

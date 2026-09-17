@@ -16,7 +16,7 @@ async function call(channel, ...args) {
 const MENU_CHANNELS = [
   'menu:new-sql', 'menu:new-connection', 'menu:commit',
   'menu:rollback', 'menu:toggle-autocommit', 'menu:refresh',
-  'menu:history', 'menu:explain', 'menu:sql-list',
+  'menu:history', 'menu:explain', 'menu:sql-list', 'menu:chat-history',
 ];
 
 contextBridge.exposeInMainWorld('api', {
@@ -85,6 +85,13 @@ contextBridge.exposeInMainWorld('api', {
     flush: (snapshot) => {
       try { ipcRenderer.sendSync('workspace:flush', snapshot); } catch (_) { /* 종료 중 */ }
     },
+  },
+  chatHistory: {
+    list: (query) => call('chat-history:list', query || {}),
+    get: (id) => call('chat-history:get', id),
+    save: (conv) => call('chat-history:save', conv),
+    remove: (id) => call('chat-history:remove', id),
+    clear: () => call('chat-history:clear'),
   },
   history: {
     list: (query) => call('history:list', query || {}),

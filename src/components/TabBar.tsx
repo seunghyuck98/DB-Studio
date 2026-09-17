@@ -6,7 +6,7 @@ import {
 } from '../state/store';
 import type { Tab } from '../types';
 
-const TAB_ICON: Record<Tab['kind'], string> = { table: 'table', sql: 'sql', history: 'history', tx: 'tx', schema: 'schema' };
+const TAB_ICON: Record<Tab['kind'], string> = { table: 'table', sql: 'sql', history: 'history', tx: 'tx', schema: 'schema', chatHistory: 'chat' };
 
 const TAB_SUB: Partial<Record<Tab['kind'], string>> = { history: '전체', tx: '트랜잭션', schema: '테이블 목록' };
 
