@@ -463,8 +463,14 @@ DB 접근은 전부 메인 프로세스에서 일어나고, 렌더러는 `contex
 헤더의 `Claude` 버튼을 누르면 우측에 대화 사이드바가 열린다. 자연어로 데이터베이스를
 물어보면 (`@anthropic-ai/claude-agent-sdk`) 에이전트가 답한다.
 
-- **DB 접근은 `emr-db` MCP 로만** 한다 (`~/.genaidews/mcp.json` 등에서 설정을 읽어 온다).
-  자격증명은 그 MCP 서버 안에 있고 앱은 값을 다루지 않는다.
+- **DB 접근은 `emr-db` MCP 로만** 한다. 설정은 `DBSTUDIO_MCP_JSON` →
+  `~/Library/Application Support/Claude/claude_desktop_config.json` → `~/.genaidews/mcp.json` →
+  `~/.claude.json` 순으로 찾되, **`env.MYSQL_HOST` 가 들어 있는 완결된 설정을 우선** 쓴다.
+  `@benborla29/mcp-server-mysql` 은 `MYSQL_HOST/PORT/USER/PASS/DB` 만 읽어서, 래퍼 스크립트가
+  `DB_HOST` 같은 다른 이름으로 export 하면 서버가 기본값(127.0.0.1:3306)으로 붙는다 —
+  핸드셰이크는 성공해 `connected` 로 보이지만 첫 쿼리에서 `-32000: Connection closed` 로 끊긴다.
+  접속 정보가 설정 안에 없으면 헤더에 `설정 확인 필요` 를 띄운다.
+  자격증명 값은 spawn 할 때 그대로 넘기기만 하고 로그·UI 에 내보내지 않는다.
 - **쿼리는 실행 계획을 확인해 최적으로** 짜고, 쿼리·실행 계획·해석을 함께 돌려준다
   (`skills/db-studio/SKILL.md` 의 규칙).
 - **조회 전용이다.** `mysql_query` 로 나가는 SQL 을 도구 경계에서 검사해

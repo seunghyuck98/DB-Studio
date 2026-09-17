@@ -24,7 +24,7 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
-  const [ready, setReady] = useState<{ hasEmrDb: boolean } | null>(null);
+  const [ready, setReady] = useState<{ hasEmrDb: boolean; emrSource?: string | null; emrComplete?: boolean } | null>(null);
   const [mcpDown, setMcpDown] = useState(false);
   const sessionRef = useRef<string | undefined>(undefined);
   const runIdRef = useRef<string | null>(null);
@@ -77,7 +77,9 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
               ...msg,
               error: true,
               text: `⚠ emr-db MCP 서버에 연결하지 못했습니다 (상태: ${ev.emrStatus}). `
-                + '데이터베이스 직접 조회가 불가능합니다. VPN 연결과 emr-db MCP 설정(run.sh)을 확인하세요.',
+                + '데이터베이스 직접 조회가 불가능합니다. VPN 연결과 emr-db MCP 설정'
+                + (ready?.emrSource ? ` (${ready.emrSource})` : '')
+                + '의 MYSQL_HOST/PORT/USER/PASS/DB 값을 확인하세요.',
             }));
           }
           break;
@@ -137,6 +139,14 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
       <div className="chat-head">
         <b>Claude · DB 도우미</b>
         {ready && !ready.hasEmrDb && <span className="chat-warn" title="emr-db MCP 설정을 찾지 못했습니다">설정 없음</span>}
+        {ready && ready.hasEmrDb && !ready.emrComplete && !mcpDown && (
+          <span
+            className="chat-warn"
+            title={`emr-db 설정(${ready.emrSource ?? ''})에 MYSQL_HOST 등 접속 정보가 없습니다. 래퍼 스크립트가 다른 이름으로 넘기면 첫 쿼리에서 연결이 끊길 수 있습니다.`}
+          >
+            설정 확인 필요
+          </span>
+        )}
         {ready && ready.hasEmrDb && mcpDown && <span className="chat-warn" title="emr-db MCP 서버에 연결하지 못했습니다">DB 연결 실패</span>}
         <div className="spacer" />
         <button className="icon-btn" title="새 대화" onClick={reset} disabled={!messages.length}>⟲</button>

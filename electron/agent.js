@@ -36,25 +36,44 @@ function skillText() {
   }
 }
 
+/** emr-db 설정을 찾아볼 파일들. 앞쪽이 우선이지만, 완결된 설정(아래 참고)이 있으면 그쪽을 먼저 쓴다. */
+function emrDbCandidates() {
+  const home = os.homedir();
+  return [
+    process.env.DBSTUDIO_MCP_JSON,
+    // 데스크톱 Claude 앱 설정 — 실제로 동작 중인 것으로 검증된 emr-db 가 여기 있다.
+    path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
+    path.join(home, '.genaidews', 'mcp.json'),
+    path.join(home, '.claude.json'),
+  ].filter(Boolean);
+}
+
+/**
+ * @benborla29/mcp-server-mysql 은 MYSQL_HOST/PORT/USER/PASS/DB 만 읽는다.
+ * env 에 MYSQL_HOST 가 직접 들어 있으면 그 자체로 완결된 설정으로 본다 — 래퍼 스크립트(run.sh)가
+ * 다른 이름(DB_HOST 등)으로 export 하는 경우 서버가 값을 못 받아 첫 쿼리에서 끊기기 때문이다.
+ */
+function isCompleteEmrDb(spec) {
+  return !!(spec && spec.env && typeof spec.env === 'object' && spec.env.MYSQL_HOST);
+}
+
 /**
  * emr-db MCP 서버 설정을 사용자 MCP 설정 파일에서 읽어 온다.
- * 자격증명은 그 서버(run.sh) 안에 있어 여기서 값을 다루지 않는다.
+ * 자격증명 값은 spawn 할 때 env 로 넘기기만 하고 로그·UI 에 내보내지 않는다.
  */
 function emrDbServer() {
-  const custom = process.env.DBSTUDIO_MCP_JSON;
-  const candidates = [
-    custom,
-    path.join(os.homedir(), '.genaidews', 'mcp.json'),
-    path.join(os.homedir(), '.claude.json'),
-  ].filter(Boolean);
-  for (const file of candidates) {
+  let fallback = null;
+  for (const file of emrDbCandidates()) {
     try {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
       const found = findEmrDb(parsed);
-      if (found) return found;
+      if (!found) continue;
+      found.source = file;
+      if (isCompleteEmrDb(found)) return found;
+      if (!fallback) fallback = found;
     } catch (_) { /* 다음 후보 */ }
   }
-  return null;
+  return fallback;
 }
 
 function findEmrDb(obj) {
@@ -140,13 +159,30 @@ function isReadOnlySql(sql) {
   return true;
 }
 
+/** SDK 에 넘길 MCP 서버 목록. 설정을 못 찾으면 빈 객체. */
+function emrMcpServers() {
+  const emr = emrDbServer();
+  if (!emr) return {};
+  return {
+    'emr-db': {
+      type: 'stdio',
+      command: emr.command,
+      args: emr.args,
+      env: richEnv(emr.env || {}),
+    },
+  };
+}
+
 /** 진행 중인 대화들: id → { abort, sessionId } */
 const runs = new Map();
 
-/** 상태 확인용 — 사이드바가 뜰 때 준비 여부를 보여 준다. */
+/** 상태 확인용 — 사이드바가 뜰 때 준비 여부를 보여 준다. (자격증명 값은 담지 않는다) */
 function status() {
+  const emr = emrDbServer();
   return {
-    hasEmrDb: !!emrDbServer(),
+    hasEmrDb: !!emr,
+    emrSource: emr ? emr.source : null,
+    emrComplete: isCompleteEmrDb(emr),
     claudeBin: claudeExecutable(),
   };
 }
@@ -167,16 +203,7 @@ async function ask(req, onEvent) {
     return;
   }
 
-  const emr = emrDbServer();
-  const mcpServers = {};
-  if (emr) {
-    mcpServers['emr-db'] = {
-      type: 'stdio',
-      command: emr.command,
-      args: emr.args,
-      env: richEnv(emr.env || {}),
-    };
-  }
+  const mcpServers = emrMcpServers();
 
   // 구독 로그인이 있으면 API 키가 없어도 된다. 키가 오면 그걸 우선 쓴다.
   const extra = { CLAUDE_AGENT_SDK_CLIENT_APP: 'db-studio/1.0' };
@@ -332,4 +359,4 @@ function stop(runId) {
   return true;
 }
 
-module.exports = { ask, stop, status };
+module.exports = { ask, stop, status, emrMcpServers };

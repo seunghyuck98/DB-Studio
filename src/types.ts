@@ -442,7 +442,14 @@ declare global {
         summary(): Promise<UsageSummary>;
       };
       agent: {
-        status(): Promise<{ hasEmrDb: boolean; claudeBin: string }>;
+        status(): Promise<{
+          hasEmrDb: boolean;
+          /** 설정을 읽어 온 파일 경로 (자격증명 값은 담기지 않는다) */
+          emrSource: string | null;
+          /** MYSQL_* 접속 정보가 설정 안에 직접 들어 있는지 */
+          emrComplete: boolean;
+          claudeBin: string;
+        }>;
         ask(req: { runId: string; prompt: string; resume?: string; apiKey?: string }, onEvent: (ev: AgentEvent) => void): () => void;
         stop(runId: string): void;
       };
