@@ -5,11 +5,14 @@ import { EditorView, keymap } from '@codemirror/view';
 import { EditorState, Prec, type Extension } from '@codemirror/state';
 import ResultGrid from './ResultGrid';
 import PlanView from './PlanView';
+import ContextMenu, { type MenuState } from './ContextMenu';
+import AskAiDialog from './AskAiDialog';
 import {
   getTabScratch, setTabScratch, setSession, notify, sessionOf, connectionOf, getState, useAppState, activeTab,
   openTableTab,
 } from '../state/store';
 import { setSplitOnBlankLine, message, connect } from '../state/actions';
+import type { SqlContext } from '../state/chat';
 import { scheduleWorkspaceSave } from '../state/workspace';
 import { statementAt } from '../lib/sqlparse';
 import { tableLink, type LinkPart } from '../lib/tablelink';
@@ -48,6 +51,8 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
   const [running, setRunning] = useState(false);
   const [analyze, setAnalyze] = useState(false);
   const viewRef = useRef<EditorView | null>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const [askSql, setAskSql] = useState<string | null>(null);
   const runRef = useRef<(whole: boolean) => void>(() => {});
   const explainRef = useRef<() => void>(() => {});
   const linkRef = useRef<(parts: LinkPart[]) => void>(() => {});
@@ -197,6 +202,25 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
   explainRef.current = () => { void explain(); };
   linkRef.current = (parts: LinkPart[]) => { void openLinkedTable(parts); };
 
+  /** 편집기 우클릭 — 선택 영역(없으면 커서 위치 문장)을 대상으로 한다. */
+  const onContextMenu = useCallback((e: ReactMouseEvent) => {
+    e.preventDefault();
+    const sql = targetSql(false).trim();
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: 'AI 에게 질문하기…', disabled: !sql, action: () => setAskSql(sql) },
+        { label: '실행', disabled: !sql || offline, separated: true, action: () => runRef.current(false) },
+        { label: '실행 계획', disabled: !sql || offline, action: () => explainRef.current() },
+      ],
+    });
+  }, [targetSql, offline]);
+
+  const askContext: SqlContext | null = offline
+    ? null
+    : { connectionId: tab.connectionId, database: tab.database || session?.currentDatabase || '', schema: tab.schema || session?.currentSchema || '' };
+
   // 메뉴의 '실행 계획' 명령 처리
   useEffect(() => {
     const handler = () => { if (activeTab(getState())?.id === tab.id) explainRef.current(); };
@@ -266,7 +290,7 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
         </div>
       )}
 
-      <div className="sql-body" style={{ flexBasis: `${editorRatio}%` }}>
+      <div className="sql-body" style={{ flexBasis: `${editorRatio}%` }} onContextMenu={onContextMenu}>
         <CodeMirror
           value={text}
           height="100%"
@@ -320,6 +344,9 @@ export default function SqlEditor({ tab }: { tab: SqlTab }) {
           </div>
         )}
       </div>
+
+      {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {askSql !== null && <AskAiDialog sql={askSql} context={askContext} onClose={() => setAskSql(null)} />}
     </div>
   );
 }

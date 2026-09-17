@@ -222,6 +222,9 @@ async function ask(req, onEvent) {
         pathToClaudeCodeExecutable: claudeExecutable(),
         executable: 'node',
         cwd: AGENT_CWD, // CLI 기록을 한곳에 모아 usage 스캔에서 제외한다
+        // 같은 대화의 이전 턴을 이어 간다. 이게 없으면 매 발화가 새 세션이라
+        // "방금 찾은 테이블" 같은 맥락을 에이전트가 기억하지 못한다.
+        ...(resume ? { resume } : {}),
         abortController: controller,
         // 조회 도구는 자동 허용하되, DB 를 바꾸는 SQL 은 canUseTool 에서 막는다.
         permissionMode: 'default',

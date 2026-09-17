@@ -35,7 +35,7 @@ const CELLS: Cell[] = [
 /**
  * 헤더에 Claude 토큰 사용량을 % 로 보여 준다 — 최근 5시간 / 주간 Fable / 주간 전체.
  * Anthropic 이 실제 한도를 공개하지 않으므로, % 는 사용자가 정하는 기준 한도 대비다
- * (배지를 눌러 기준을 바꾼다). 60초마다·창 포커스 때 갱신한다.
+ * (배지를 눌러 기준을 바꾼다). 3분마다·창 포커스·새로 고침(F5) 때 갱신한다.
  */
 export default function UsageBadge() {
   const { usageLimits } = useAppState();
@@ -56,10 +56,13 @@ export default function UsageBadge() {
     load();
     timer.current = setInterval(load, 180_000); // 3분마다
     window.addEventListener('focus', load);
+    // 헤더의 '새로 고침'(F5)도 사용량을 다시 읽는다.
+    window.addEventListener('dbstudio:refresh', load);
     return () => {
       cancelled = true;
       if (timer.current) clearInterval(timer.current);
       window.removeEventListener('focus', load);
+      window.removeEventListener('dbstudio:refresh', load);
     };
   }, []);
 
