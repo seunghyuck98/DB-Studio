@@ -216,7 +216,13 @@ async function ask(req, onEvent) {
         // 여기 없는 도구는 canUseTool 로 흘러가 SQL 을 검사받는다.
         allowedTools: ['TodoWrite'],
         disallowedTools: ['Bash', 'Read', 'Write', 'Edit', 'WebFetch', 'WebSearch'],
-        settingSources: [], // 사용자 개인 설정·프로젝트 파일을 끌어오지 않는다
+        // 사용자 설정(~/.claude/settings.json)을 읽는다. 여기에 정의된 훅과 OTEL
+        // 텔레메트리로 Litmus 가 이 대화까지 수집한다. 프로젝트·로컬 설정은 끌어오지 않는다.
+        // (permissions 가 비어 있어 아래 읽기 전용 canUseTool 가드는 가려지지 않는다.)
+        settingSources: ['user'],
+        // 사용자 설정의 MCP(예: dbstudio, jira-wiki)까지 끌려오면 에이전트가 emr-db 대신
+        // 엉뚱한 접속을 쓴다. 우리가 넘긴 emr-db 만 쓰도록 파일 MCP 는 무시한다(훅·OTEL 은 유지).
+        strictMcpConfig: true,
         appendSystemPrompt: skillText(),
         includePartialMessages: true,
         maxTurns: 40,
