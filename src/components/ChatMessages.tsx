@@ -96,9 +96,10 @@ function CodeBlock({ lang, code, open, conv }: { lang: string; code: string; ope
     }
   };
   const apply = () => {
-    const how = applySqlToEditor(code, conv);
-    if (how === 'appended') notify('success', '열려 있는 SQL 편집기 끝에 쿼리를 이어 붙였습니다.');
-    else if (how === 'opened') notify('success', '새 SQL 편집기에 쿼리를 넣었습니다.');
+    const r = applySqlToEditor(code, conv);
+    if (!r) return;
+    const where = r.how === 'appended' ? '열려 있는 SQL 편집기 끝에 쿼리를 이어 붙였습니다.' : '새 SQL 편집기에 쿼리를 넣었습니다.';
+    notify('success', r.schema ? `${where} (테이블 이름에 ${r.schema} 스키마를 붙였습니다)` : where);
   };
   return (
     <div className={`chat-code ${open ? 'open' : ''}`}>
@@ -111,7 +112,7 @@ function CodeBlock({ lang, code, open, conv }: { lang: string; code: string; ope
             className="btn tiny primary"
             onClick={apply}
             disabled={open}
-            title="열려 있는 SQL 편집기 끝에 이어 붙입니다. 없으면 현재 접속·스키마로 새 편집기를 열어 넣습니다"
+            title="열려 있는 SQL 편집기 끝에 이어 붙입니다(없으면 새 편집기). 테이블 이름에는 현재 선택된 스키마를 붙입니다"
           >
             즉시 적용
           </button>

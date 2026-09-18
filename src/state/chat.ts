@@ -4,6 +4,7 @@ import {
   sqlTabs, paneActiveId, setActiveTab, getTabScratch, setTabScratch,
 } from './store';
 import { scheduleWorkspaceSave } from './workspace';
+import { qualifySql } from '../lib/sqlqualify';
 import type { AgentEvent, SavedConversation } from '../types';
 
 /** 히스토리 탭이 듣는 이벤트 — 저장된 대화가 바뀌었으니 목록을 다시 읽으라는 신호 */
@@ -350,10 +351,29 @@ function targetSqlTab() {
  * 없으면 지금 연결된 접속·스키마로 새 편집기를 열어 넣는다. 접속도 없으면 대화가 시작된
  * 맥락으로, 그것도 없으면 안내만 한다.
  */
-export function applySqlToEditor(sql: string, conv: Conversation | null): 'appended' | 'opened' | false {
-  const body = sql.trim();
+export interface ApplyResult {
+  how: 'appended' | 'opened';
+  /** 테이블 이름에 붙인 스키마. 붙일 스키마가 없었으면 null */
+  schema: string | null;
+}
+
+/**
+ * 편집기가 쓰는 접속의 "현재 선택된 스키마" — 툴바에서 고른 것(MySQL 은 데이터베이스)이 우선,
+ * 없으면 탭이 만들어질 때의 스키마.
+ */
+function schemaFor(connectionId: string, tabSchema: string): { schema: string; dialect: 'mysql' | 'postgres' } | null {
+  const session = sessionOf(connectionId, getState());
+  const schema = session?.currentSchema || tabSchema;
+  if (!schema) return null;
+  return { schema, dialect: session?.kind === 'postgres' ? 'postgres' : 'mysql' };
+}
+
+export function applySqlToEditor(sql: string, conv: Conversation | null): ApplyResult | false {
   const existing = targetSqlTab();
   if (existing) {
+    // 답변의 쿼리는 스키마 없이 `FROM t` 로 오기 쉬운데, 편집기는 현재 선택된 스키마로 실행한다.
+    const q = schemaFor(existing.connectionId, existing.schema);
+    const body = q ? qualifySql(sql.trim(), q.schema, q.dialect) : sql.trim();
     const prev = getTabScratch<string>(existing.id, 'sql', '');
     const sep = prev.trim() ? (prev.endsWith('\n') ? '\n' : '\n\n') : '';
     setTabScratch(existing.id, 'sql', prev + sep + body + '\n');
@@ -361,7 +381,7 @@ export function applySqlToEditor(sql: string, conv: Conversation | null): 'appen
     scheduleWorkspaceSave();
     // 편집기가 화면에 붙어 있으면 새 본문을 읽어 가고, 아니면 붙을 때 스크래치에서 읽는다.
     window.dispatchEvent(new CustomEvent(SQL_APPLIED_EVENT, { detail: { tabId: existing.id } }));
-    return 'appended';
+    return { how: 'appended', schema: q?.schema ?? null };
   }
 
   const s = getState();
@@ -371,6 +391,8 @@ export function applySqlToEditor(sql: string, conv: Conversation | null): 'appen
     notify('info', '열려 있는 접속이 없어 편집기를 만들 수 없습니다. 먼저 접속하세요.');
     return false;
   }
+  const q = schemaFor(ctx.connectionId, ctx.schema);
+  const body = q ? qualifySql(sql.trim(), q.schema, q.dialect) : sql.trim();
   openSqlTab(ctx.connectionId, ctx.database, ctx.schema, body + '\n');
-  return 'opened';
+  return { how: 'opened', schema: q?.schema ?? null };
 }
