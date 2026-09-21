@@ -99,7 +99,9 @@ function CodeBlock({ lang, code, open, conv }: { lang: string; code: string; ope
     const r = applySqlToEditor(code, conv);
     if (!r) return;
     const where = r.how === 'appended' ? '열려 있는 SQL 편집기 끝에 쿼리를 이어 붙였습니다.' : '새 SQL 편집기에 쿼리를 넣었습니다.';
-    notify('success', r.schema ? `${where} (테이블 이름에 ${r.schema} 스키마를 붙였습니다)` : where);
+    notify('success', r.schema
+      ? `${where} (테이블 이름에 ${r.schema} 스키마를 붙였습니다)`
+      : `${where} 선택된 스키마가 없어 스키마는 붙이지 않았습니다 — 툴바에서 DB 를 고르세요.`);
   };
   return (
     <div className={`chat-code ${open ? 'open' : ''}`}>

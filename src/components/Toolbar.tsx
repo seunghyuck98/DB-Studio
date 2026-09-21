@@ -51,7 +51,15 @@ export default function Toolbar({ connectionId }: Props) {
   // 커밋 버튼에는 조회를 제외한 실제 변경 문장 수를 보여 준다.
   const pending = session?.txChanges ?? 0;
 
+  // 접속에 기본 DB 가 없으면 세션의 현재 DB 는 null 이다. 그때 <select> 는 값이 목록에 없어
+  // 첫 항목(information_schema 등)을 고른 것처럼 보여 준다 — 빈 항목을 넣어 사실대로 보이게 한다.
+  const currentDb = session?.currentDatabase ?? '';
+  const dbChosen = databases.some((d) => d.name === currentDb);
+  const currentSchema = session?.currentSchema ?? '';
+  const schemaChosen = schemas.some((s) => s.name === currentSchema);
+
   const onDatabaseChange = async (value: string) => {
+    if (!value) return;
     if (!connectionId) return;
     try {
       await switchDatabase(connectionId, value);
@@ -111,10 +119,11 @@ export default function Toolbar({ connectionId }: Props) {
         <select
           className="select"
           disabled={!connected || databases.length === 0}
-          value={session?.currentDatabase ?? ''}
+          value={dbChosen ? currentDb : ''}
           onChange={(e) => void onDatabaseChange(e.target.value)}
+          title={dbChosen ? undefined : '선택된 데이터베이스가 없습니다'}
         >
-          {databases.length === 0 && <option value="">-</option>}
+          {!dbChosen && <option value="">{databases.length === 0 ? '-' : '선택 안 함'}</option>}
           {databases.map((d) => (
             <option key={d.name} value={d.name}>{d.name}</option>
           ))}
@@ -127,10 +136,11 @@ export default function Toolbar({ connectionId }: Props) {
           <select
             className="select"
             disabled={!connected || schemas.length === 0}
-            value={session?.currentSchema ?? ''}
-            onChange={(e) => connectionId && void switchSchema(connectionId, e.target.value)}
+            value={schemaChosen ? currentSchema : ''}
+            onChange={(e) => connectionId && e.target.value && void switchSchema(connectionId, e.target.value)}
+            title={schemaChosen ? undefined : '선택된 스키마가 없습니다'}
           >
-            {schemas.length === 0 && <option value="">-</option>}
+            {!schemaChosen && <option value="">{schemas.length === 0 ? '-' : '선택 안 함'}</option>}
             {schemas.map((s) => (
               <option key={s.name} value={s.name}>{s.name}</option>
             ))}

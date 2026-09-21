@@ -16,8 +16,8 @@ interface Token {
   end: number;
 }
 
-const IDENT_START = /[A-Za-z_-￿]/;
-const IDENT_PART = /[\w$-￿]/;
+const IDENT_START = /[A-Za-z_\u0080-\uFFFF]/;
+const IDENT_PART = /[\w$\u0080-\uFFFF]/;
 
 /** 문자열·주석은 토큰에서 빼고, 식별자·기호만 위치와 함께 뽑는다. */
 function tokenize(sql: string, dialect: Dialect): Token[] {

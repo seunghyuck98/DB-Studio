@@ -5,7 +5,7 @@ import {
 } from './store';
 import { scheduleWorkspaceSave } from './workspace';
 import { qualifySql } from '../lib/sqlqualify';
-import type { AgentEvent, SavedConversation } from '../types';
+import type { AgentEvent, SavedConversation, Tab } from '../types';
 
 /** 히스토리 탭이 듣는 이벤트 — 저장된 대화가 바뀌었으니 목록을 다시 읽으라는 신호 */
 export const CHAT_HISTORY_CHANGED_EVENT = 'dbstudio:chat-history-changed';
@@ -358,21 +358,47 @@ export interface ApplyResult {
 }
 
 /**
- * 편집기가 쓰는 접속의 "현재 선택된 스키마" — 툴바에서 고른 것(MySQL 은 데이터베이스)이 우선,
- * 없으면 탭이 만들어질 때의 스키마.
+ * 쿼리에 붙일 스키마를 고른다. 아래 순서로 처음 찾은 것을 쓴다.
+ *
+ * 1. 세션이 **실제로** 선택한 스키마·데이터베이스 (툴바에서 고른 것)
+ * 2. 편집기 탭이 들고 있는 스키마·데이터베이스
+ * 3. 같은 접속에서 보고 있는 테이블·스키마 탭의 스키마
+ * 4. 대화가 시작된 맥락의 스키마·데이터베이스
+ *
+ * 접속 설정에 기본 데이터베이스가 없으면 `SELECT DATABASE()` 가 NULL 이라 세션의
+ * currentSchema 도 null 이다. 이때 1번만 보면 아무것도 못 붙이므로 뒤의 단서까지 본다.
  */
-function schemaFor(connectionId: string, tabSchema: string): { schema: string; dialect: 'mysql' | 'postgres' } | null {
-  const session = sessionOf(connectionId, getState());
-  const schema = session?.currentSchema || tabSchema;
-  if (!schema) return null;
-  return { schema, dialect: session?.kind === 'postgres' ? 'postgres' : 'mysql' };
+function schemaFor(
+  target: { connectionId: string; schema: string; database: string },
+  conv: Conversation | null,
+): { schema: string; dialect: 'mysql' | 'postgres' } | null {
+  const s = getState();
+  const session = sessionOf(target.connectionId, s);
+  const dialect = session?.kind === 'postgres' ? 'postgres' : 'mysql';
+
+  // 같은 접속에서 열려 있는 테이블·스키마 탭 (보고 있는 것 우선)
+  const hasSchema = (t: Tab): boolean => t.connectionId === target.connectionId && 'schema' in t && !!t.schema;
+  const active = activeTab(s);
+  const viewed = active && hasSchema(active) ? active : s.tabs.find(hasSchema);
+
+  const candidates = [
+    session?.currentSchema,
+    session?.currentDatabase,
+    target.schema,
+    target.database,
+    viewed && 'schema' in viewed ? viewed.schema : '',
+    conv?.context?.schema,
+    conv?.context?.database,
+  ];
+  const schema = candidates.find((c) => typeof c === 'string' && c.trim());
+  return schema ? { schema: schema.trim(), dialect } : null;
 }
 
 export function applySqlToEditor(sql: string, conv: Conversation | null): ApplyResult | false {
   const existing = targetSqlTab();
   if (existing) {
     // 답변의 쿼리는 스키마 없이 `FROM t` 로 오기 쉬운데, 편집기는 현재 선택된 스키마로 실행한다.
-    const q = schemaFor(existing.connectionId, existing.schema);
+    const q = schemaFor(existing, conv);
     const body = q ? qualifySql(sql.trim(), q.schema, q.dialect) : sql.trim();
     const prev = getTabScratch<string>(existing.id, 'sql', '');
     const sep = prev.trim() ? (prev.endsWith('\n') ? '\n' : '\n\n') : '';
@@ -391,7 +417,7 @@ export function applySqlToEditor(sql: string, conv: Conversation | null): ApplyR
     notify('info', '열려 있는 접속이 없어 편집기를 만들 수 없습니다. 먼저 접속하세요.');
     return false;
   }
-  const q = schemaFor(ctx.connectionId, ctx.schema);
+  const q = schemaFor(ctx, conv);
   const body = q ? qualifySql(sql.trim(), q.schema, q.dialect) : sql.trim();
   openSqlTab(ctx.connectionId, ctx.database, ctx.schema, body + '\n');
   return { how: 'opened', schema: q?.schema ?? null };
