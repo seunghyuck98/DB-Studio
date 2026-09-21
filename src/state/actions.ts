@@ -26,6 +26,7 @@ export async function loadSettings(): Promise<void> {
       splitOnBlankLine: !!s.splitOnBlankLine,
       sidebarWidth: clampSidebar(s.sidebarWidth),
       chatWidth: clampChat(s.chatWidth),
+      chatOpen: !!s.chatOpen,
       usageLimits: sanitizeLimits(s.usageLimits),
     });
   } catch (e) {
@@ -79,6 +80,12 @@ export async function persistChatWidth(): Promise<void> {
   try {
     await api().settings.set({ chatWidth: getState().chatWidth });
   } catch (_) { /* 다음에 다시 */ }
+}
+
+/** 사이드바를 열고 닫은 상태를 설정 파일에도 남긴다. */
+export function setChatOpen(open: boolean): void {
+  setState({ chatOpen: open });
+  void api().settings.set({ chatOpen: open }).catch(() => { /* 다음에 다시 */ });
 }
 
 /** 사용량 % 기준 한도를 바꾸고 저장한다. */

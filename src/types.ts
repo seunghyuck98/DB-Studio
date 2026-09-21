@@ -323,6 +323,8 @@ export interface SavedConversation {
   updatedAt: number;
   sessionId?: string | null;
   context?: { connectionId: string; database: string; schema: string } | null;
+  /** 사이드바에 열려 있는 대화인지 (다음 실행 때 되살린다) */
+  open?: boolean;
   messages: SavedChatMessage[];
 }
 
@@ -390,6 +392,8 @@ export interface UsageLimits {
 
 export interface AppSettings {
   splitOnBlankLine: boolean;
+  /** Claude 대화 사이드바를 열어 둔 상태인지 */
+  chatOpen: boolean;
   sidebarWidth: number;
   chatWidth: number;
   usageLimits: UsageLimits;
@@ -512,6 +516,10 @@ declare global {
         save(conv: SavedConversation): Promise<boolean>;
         remove(id: string): Promise<boolean>;
         clear(): Promise<boolean>;
+        /** 지난 실행에서 열려 있던 대화 (사이드바 복원용) */
+        openTabs(): Promise<{ activeId: string | null; conversations: SavedConversation[] }>;
+        setOpen(id: string, open: boolean): Promise<boolean>;
+        setActive(id: string | null): Promise<boolean>;
       };
       tx: {
         setAutoCommit(id: string, value: boolean): Promise<SessionStatus>;

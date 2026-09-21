@@ -219,6 +219,9 @@ handle('chat-history:list', (query) => chatHistory.list(query));
 handle('chat-history:get', (id) => chatHistory.get(id));
 handle('chat-history:save', (conv) => chatHistory.save(conv));
 handle('chat-history:remove', (id) => chatHistory.remove(id));
+handle('chat-history:open-tabs', () => chatHistory.openTabs());
+handle('chat-history:set-open', (id, open) => chatHistory.setOpen(id, open));
+handle('chat-history:set-active', (id) => chatHistory.setActive(id));
 handle('chat-history:clear', () => chatHistory.clear());
 
 handle('tx:autoCommit', (id, value) => db.setAutoCommit(id, value));

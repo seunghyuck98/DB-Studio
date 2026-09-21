@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppState, connectionOf, sessionOf, activeTab, openSqlTab, setState, notify, sqlTabs } from '../state/store';
-import { commit, rollback, setAutoCommit, switchSchema, switchDatabase, message } from '../state/actions';
+import { commit, rollback, setAutoCommit, switchSchema, switchDatabase, message, setChatOpen } from '../state/actions';
 import { openHistoryTab } from './HistoryTab';
 import UsageBadge from './UsageBadge';
 import type { DatabaseMeta, SchemaMeta } from '../types';
@@ -183,14 +183,14 @@ export default function Toolbar({ connectionId }: Props) {
       <div className="toolbar-spacer" />
 
       <div className="toolbar-group">
+        <UsageBadge />
         <button
           className={`btn ${state.chatOpen ? 'primary' : ''}`}
           title="Claude DB 도우미"
-          onClick={() => setState((prev) => ({ chatOpen: !prev.chatOpen }))}
+          onClick={() => setChatOpen(!state.chatOpen)}
         >
           Claude
         </button>
-        <UsageBadge />
         <button
           className="btn"
           title="새로 고침 (F5)"

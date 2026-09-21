@@ -22,9 +22,10 @@ import {
 } from './state/store';
 import {
   loadConnections, loadSettings, commit, rollback, setAutoCommit,
-  setSidebarWidth, persistSidebarWidth,
+  setSidebarWidth, persistSidebarWidth, setChatOpen,
 } from './state/actions';
 import { restoreWorkspace } from './state/workspace';
+import { restoreConversations } from './state/chat';
 
 export default function App() {
   const state = useAppState();
@@ -34,8 +35,9 @@ export default function App() {
   useEffect(() => {
     void loadConnections();
     void loadSettings();
-    // 지난 실행에서 열려 있던 SQL 편집기를 그대로 되살린다.
+    // 지난 실행에서 열려 있던 SQL 편집기와 Claude 대화를 그대로 되살린다.
     void restoreWorkspace();
+    void restoreConversations();
   }, []);
 
   // 애플리케이션 메뉴에서 오는 명령 처리 (preload 가 없으면 조용히 넘어간다)
@@ -97,7 +99,7 @@ export default function App() {
             </div>
           )}
         </main>
-        {state.chatOpen && <ChatSidebar onClose={() => setState({ chatOpen: false })} />}
+        {state.chatOpen && <ChatSidebar onClose={() => setChatOpen(false)} />}
       </div>
       <StatusBar connectionId={connId} />
       {state.sqlListOpen && <SqlEditorList />}

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { useAppState } from '../state/store';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAppState, notify } from '../state/store';
 import { setUsageLimits } from '../state/actions';
 import type { UsageSummary, UsageTotals } from '../types';
 
@@ -34,37 +34,55 @@ const CELLS: Cell[] = [
 
 /**
  * 헤더에 Claude 토큰 사용량을 % 로 보여 준다 — 최근 5시간 / 주간 Fable / 주간 전체.
- * Anthropic 이 실제 한도를 공개하지 않으므로, % 는 사용자가 정하는 기준 한도 대비다
- * (배지를 눌러 기준을 바꾼다). 3분마다·창 포커스·새로 고침(F5) 때 갱신한다.
+ * Anthropic 이 실제 한도를 공개하지 않으므로, % 는 사용자가 정하는 기준 한도 대비다.
+ *
+ * **배지를 누르면 바로 다시 읽는다.** 그 밖에 3분마다·창 포커스·새로 고침(F5) 때도 갱신한다.
+ * 기준 한도는 옆의 톱니(⚙) 버튼에서 바꾼다.
  */
 export default function UsageBadge() {
   const { usageLimits } = useAppState();
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [error, setError] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+  const alive = useRef(true);
+
+  /** @param manual 사용자가 직접 눌렀는지 (그때만 진행 표시와 알림을 낸다) */
+  const load = useCallback(async (manual = false) => {
+    if (!window.api?.usage) return;
+    if (manual) setBusy(true);
+    try {
+      const s = await window.api.usage.summary();
+      if (!alive.current) return;
+      setUsage(s);
+      setError(false);
+      if (manual) notify('success', 'Claude 사용량을 갱신했습니다.');
+    } catch (e) {
+      if (!alive.current) return;
+      setError(true);
+      if (manual) notify('error', `사용량을 읽지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      if (alive.current && manual) setBusy(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!window.api?.usage) return;
-    let cancelled = false;
-    const load = () => {
-      window.api.usage.summary()
-        .then((s) => { if (!cancelled) { setUsage(s); setError(false); } })
-        .catch(() => { if (!cancelled) setError(true); });
-    };
-    load();
-    timer.current = setInterval(load, 180_000); // 3분마다
-    window.addEventListener('focus', load);
+    alive.current = true;
+    void load();
+    timer.current = setInterval(() => void load(), 180_000); // 3분마다
+    const onRefresh = () => void load();
+    window.addEventListener('focus', onRefresh);
     // 헤더의 '새로 고침'(F5)도 사용량을 다시 읽는다.
-    window.addEventListener('dbstudio:refresh', load);
+    window.addEventListener('dbstudio:refresh', onRefresh);
     return () => {
-      cancelled = true;
+      alive.current = false;
       if (timer.current) clearInterval(timer.current);
-      window.removeEventListener('focus', load);
-      window.removeEventListener('dbstudio:refresh', load);
+      window.removeEventListener('focus', onRefresh);
+      window.removeEventListener('dbstudio:refresh', onRefresh);
     };
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     if (!editing) return;
@@ -80,12 +98,18 @@ export default function UsageBadge() {
 
   const tip = [
     ...CELLS.map((c) => detail(c.label, totalsOf(c.key), limitOf(c.key))),
-    `\n로컬 대화 기록 ${usage.files}개 기준. % 는 아래 기준 한도 대비이며, 배지를 눌러 바꿀 수 있습니다.`,
+    '\n눌러서 지금 바로 갱신합니다 (3분마다·창 포커스·새로 고침 때도 갱신).',
+    `로컬 대화 기록 ${usage.files}개 기준. % 는 기준 한도 대비이며, ⚙ 에서 바꿀 수 있습니다.`,
   ].join('\n');
 
   return (
     <div className="usage-badge-wrap" ref={boxRef}>
-      <button className="usage-badge" title={tip} onClick={() => setEditing((v) => !v)}>
+      <button
+        className={`usage-badge ${busy ? 'busy' : ''}`}
+        title={tip}
+        onClick={() => void load(true)}
+        disabled={busy}
+      >
         {CELLS.map((c, i) => {
           const p = pct(totalsOf(c.key), limitOf(c.key));
           return (
@@ -99,6 +123,15 @@ export default function UsageBadge() {
             </span>
           );
         })}
+      </button>
+
+      <button
+        className="usage-gear"
+        title="사용량 % 기준 한도 설정"
+        aria-label="사용량 기준 한도 설정"
+        onClick={() => setEditing((v) => !v)}
+      >
+        ⚙
       </button>
 
       {editing && (

@@ -1195,7 +1195,16 @@ body {
 .chat-input textarea:focus { outline: none; border-color: var(--accent); }
 
 /* ---- 사용량 배지: % 와 미니 바 ---- */
-.usage-badge-wrap { position: relative; }
+.usage-badge-wrap { position: relative; display: flex; align-items: center; gap: 2px; }
+.usage-badge.busy { opacity: 0.55; cursor: progress; }
+.usage-gear {
+  flex: 0 0 auto;
+  width: 20px; height: 20px; padding: 0;
+  border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--text-faint);
+  font-size: 11px; line-height: 1; cursor: pointer;
+}
+.usage-gear:hover { color: var(--text); background: var(--bg-raised); border-color: var(--border); }
 .usage-badge {
   display: flex; align-items: center; gap: 8px;
   padding: 3px 10px; margin-right: 4px;

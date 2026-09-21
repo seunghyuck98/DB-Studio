@@ -91,6 +91,9 @@ contextBridge.exposeInMainWorld('api', {
     get: (id) => call('chat-history:get', id),
     save: (conv) => call('chat-history:save', conv),
     remove: (id) => call('chat-history:remove', id),
+    openTabs: () => call('chat-history:open-tabs'),
+    setOpen: (id, open) => call('chat-history:set-open', id, open),
+    setActive: (id) => call('chat-history:set-active', id),
     clear: () => call('chat-history:clear'),
   },
   history: {

@@ -1,10 +1,11 @@
 import { useSyncExternalStore } from 'react';
 import {
-  getState, setState, notify, activeConnectionId, activeTab, sessionOf, connectionOf, openSqlTab,
+  getState, notify, activeConnectionId, activeTab, sessionOf, connectionOf, openSqlTab,
   sqlTabs, paneActiveId, setActiveTab, getTabScratch, setTabScratch,
 } from './store';
 import { scheduleWorkspaceSave } from './workspace';
 import { qualifySql } from '../lib/sqlqualify';
+import { setChatOpen } from './actions';
 import type { AgentEvent, SavedConversation, Tab } from '../types';
 
 /** 히스토리 탭이 듣는 이벤트 — 저장된 대화가 바뀌었으니 목록을 다시 읽으라는 신호 */
@@ -135,7 +136,40 @@ export function newConversation(opts: { title?: string; context?: SqlContext } =
     updatedAt: now,
   };
   emit({ ...state, conversations: [...state.conversations, conv], activeId: id });
+  void window.api?.chatHistory?.setActive(id).catch(() => {});
   return id;
+}
+
+/**
+ * 지난 실행에서 열려 있던 대화를 되살린다 (SQL 편집기와 같은 방식).
+ * 사이드바에서 탭을 직접 닫은 대화만 빠진다 — 닫아도 히스토리에는 그대로 남는다.
+ */
+export async function restoreConversations(): Promise<void> {
+  if (!window.api?.chatHistory) return;
+  try {
+    const saved = await window.api.chatHistory.openTabs();
+    if (!saved?.conversations?.length) return;
+    const restored: Conversation[] = saved.conversations
+      .filter((c) => !state.conversations.some((x) => x.id === c.id))
+      .map((c) => ({
+        id: c.id,
+        title: c.title,
+        messages: c.messages.map((m) => ({ role: m.role, text: m.text, tools: m.tools ?? [], error: m.error })),
+        sessionId: c.sessionId ?? undefined,
+        running: false,
+        runId: null,
+        mcpDown: false,
+        context: c.context ?? undefined,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      }));
+    if (!restored.length) return;
+    const all = [...state.conversations, ...restored];
+    const activeId = all.some((c) => c.id === saved.activeId) ? saved.activeId : restored[restored.length - 1].id;
+    emit({ ...state, conversations: all, activeId });
+  } catch (_) {
+    /* 대화를 못 되살려도 앱은 정상 동작해야 한다 */
+  }
 }
 
 /** 대화를 히스토리 파일에 남긴다 (발화 직후·응답 완료 때). 빈 대화는 남기지 않는다. */
@@ -181,12 +215,15 @@ export function openSavedConversation(saved: SavedConversation): void {
   } else {
     emit({ ...state, activeId: saved.id });
   }
-  setState({ chatOpen: true });
+  void window.api?.chatHistory?.setOpen(saved.id, true).catch(() => {});
+  void window.api?.chatHistory?.setActive(saved.id).catch(() => {});
+  setChatOpen(true);
 }
 
 export function activateConversation(id: string): void {
   if (state.activeId === id || !state.conversations.some((c) => c.id === id)) return;
   emit({ ...state, activeId: id });
+  void window.api?.chatHistory?.setActive(id).catch(() => {});
 }
 
 /** 대화를 닫는다. 진행 중이면 응답을 끊고, 옆 탭을 활성화한다. */
@@ -200,6 +237,9 @@ export function closeConversation(id: string): void {
   let activeId = state.activeId;
   if (activeId === id) activeId = (rest[idx] ?? rest[idx - 1])?.id ?? null;
   emit({ ...state, conversations: rest, activeId });
+  // 탭을 직접 닫았으니 다음 실행 때는 되살리지 않는다 (히스토리에는 그대로 남는다).
+  void window.api?.chatHistory?.setOpen(id, false).catch(() => {});
+  void window.api?.chatHistory?.setActive(activeId).catch(() => {});
 }
 
 export function stopConversation(id: string): void {
@@ -324,7 +364,7 @@ export function askAboutSql(req: { sql: string; question: string; context: SqlCo
   lines.push('아래 SQL 에 대한 질문입니다.', '', '```sql', sql, '```', '', `질문: ${question}`);
 
   const id = newConversation({ title: titleFrom(question), context: req.context ?? undefined });
-  setState({ chatOpen: true });
+  setChatOpen(true);
   sendPrompt(lines.join('\n'), id);
 }
 
