@@ -138,7 +138,7 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
             })}
           </select>
           {current && !modelAvailable(current, cli) && (
-            <span className="chat-warn" title={`이 모델은 Claude Code ${current.minCli} 이상이 필요합니다. 터미널에서 claude update 를 실행하세요 (설치본: ${cli ?? '알 수 없음'}).`}>
+            <span className="chat-warn" title={`이 모델은 Claude Code ${current.minCli} 이상이 필요합니다 (설치본: ${cli ?? '알 수 없음'}). 터미널에서 claude update 를 실행한 뒤 DB Studio 를 다시 켜면 풀립니다.`}>
               claude update 필요
             </span>
           )}
