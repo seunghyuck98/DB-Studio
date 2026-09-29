@@ -64,6 +64,8 @@ export interface AppState {
   sidebarWidth: number;
   /** 우측 Claude 대화 사이드바 너비 (px) */
   chatWidth: number;
+  /** 새 대화에 쓸 모델 id (빈 값이면 기본 모델) */
+  chatModel: string;
   /** 토큰 사용량 % 표시의 기준 한도 */
   usageLimits: { fiveHour: number; weekFable: number; weekAll: number };
   dialog:
@@ -97,6 +99,7 @@ const initialState: AppState = {
   splitOnBlankLine: false,
   sidebarWidth: 280,
   chatWidth: 380,
+  chatModel: '',
   usageLimits: { fiveHour: 28_000_000, weekFable: 120_000_000, weekAll: 350_000_000 },
   dialog: null,
 };

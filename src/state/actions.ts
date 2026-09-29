@@ -27,6 +27,7 @@ export async function loadSettings(): Promise<void> {
       sidebarWidth: clampSidebar(s.sidebarWidth),
       chatWidth: clampChat(s.chatWidth),
       chatOpen: !!s.chatOpen,
+      chatModel: typeof s.chatModel === 'string' ? s.chatModel : '',
       usageLimits: sanitizeLimits(s.usageLimits),
     });
   } catch (e) {
@@ -86,6 +87,12 @@ export async function persistChatWidth(): Promise<void> {
 export function setChatOpen(open: boolean): void {
   setState({ chatOpen: open });
   void api().settings.set({ chatOpen: open }).catch(() => { /* 다음에 다시 */ });
+}
+
+/** 대화에 쓸 모델을 바꾸고 설정 파일에도 남긴다 (다음 실행·새 대화의 기본값). */
+export function setChatModel(model: string): void {
+  setState({ chatModel: model });
+  void api().settings.set({ chatModel: model }).catch(() => { /* 다음에 다시 */ });
 }
 
 /** 사용량 % 기준 한도를 바꾸고 저장한다. */

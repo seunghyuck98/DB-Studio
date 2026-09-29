@@ -5,7 +5,7 @@ import {
 } from './store';
 import { scheduleWorkspaceSave } from './workspace';
 import { qualifySql } from '../lib/sqlqualify';
-import { setChatOpen } from './actions';
+import { setChatOpen, setChatModel } from './actions';
 import type { AgentEvent, SavedConversation, Tab } from '../types';
 
 /** 히스토리 탭이 듣는 이벤트 — 저장된 대화가 바뀌었으니 목록을 다시 읽으라는 신호 */
@@ -44,6 +44,8 @@ export interface Conversation {
   runId: string | null;
   mcpDown: boolean;
   context?: SqlContext;
+  /** 이 대화에 쓰는 모델 id (빈 값이면 기본 모델) */
+  model: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -52,6 +54,8 @@ export interface AgentInfo {
   hasEmrDb: boolean;
   emrSource: string | null;
   emrComplete: boolean;
+  /** 설치된 Claude Code 버전 — 어떤 모델을 고를 수 있는지 판단용 */
+  claudeVersion: string | null;
 }
 
 interface ChatState {
@@ -113,9 +117,9 @@ export async function loadAgentInfo(): Promise<void> {
   if (state.agent || !window.api?.agent) return;
   try {
     const s = await window.api.agent.status();
-    emit({ ...state, agent: { hasEmrDb: s.hasEmrDb, emrSource: s.emrSource, emrComplete: s.emrComplete } });
+    emit({ ...state, agent: { hasEmrDb: s.hasEmrDb, emrSource: s.emrSource, emrComplete: s.emrComplete, claudeVersion: s.claudeVersion } });
   } catch (_) {
-    emit({ ...state, agent: { hasEmrDb: false, emrSource: null, emrComplete: false } });
+    emit({ ...state, agent: { hasEmrDb: false, emrSource: null, emrComplete: false, claudeVersion: null } });
   }
 }
 
@@ -132,6 +136,7 @@ export function newConversation(opts: { title?: string; context?: SqlContext } =
     runId: null,
     mcpDown: false,
     context: opts.context,
+    model: getState().chatModel,
     createdAt: now,
     updatedAt: now,
   };
@@ -160,6 +165,7 @@ export async function restoreConversations(): Promise<void> {
         runId: null,
         mcpDown: false,
         context: c.context ?? undefined,
+        model: c.model ?? '',
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
       }));
@@ -183,6 +189,7 @@ function persist(id: string): void {
     updatedAt: c.updatedAt,
     sessionId: c.sessionId ?? null,
     context: c.context ?? null,
+    model: c.model || '',
     messages: c.messages.map((m) => ({
       role: m.role, text: m.text, ...(m.tools?.length ? { tools: m.tools } : {}), ...(m.error ? { error: true } : {}),
     })),
@@ -208,6 +215,7 @@ export function openSavedConversation(saved: SavedConversation): void {
       runId: null,
       mcpDown: false,
       context: saved.context ?? undefined,
+      model: saved.model ?? '',
       createdAt: saved.createdAt,
       updatedAt: saved.updatedAt,
     };
@@ -242,6 +250,17 @@ export function closeConversation(id: string): void {
   void window.api?.chatHistory?.setActive(activeId).catch(() => {});
 }
 
+/**
+ * 이 대화에 쓸 모델을 바꾼다. 다음 발화부터 적용되고, 새 대화의 기본값으로도 남는다.
+ * (이미 오간 대화는 그대로 이어지며 모델만 갈아탄다.)
+ */
+export function setConversationModel(id: string | null, model: string): void {
+  setChatModel(model);
+  if (!id) return;
+  patchConversation(id, (c) => ({ ...c, model }));
+  persist(id);
+}
+
 export function stopConversation(id: string): void {
   const conv = state.conversations.find((c) => c.id === id);
   if (conv?.runId) window.api?.agent?.stop(conv.runId);
@@ -267,7 +286,7 @@ export function sendPrompt(prompt: string, convId: string | null = state.activeI
   }));
   persist(id);
 
-  const dispose = window.api.agent.ask({ runId, prompt: text, resume: conv.sessionId }, (ev: AgentEvent) => {
+  const dispose = window.api.agent.ask({ runId, prompt: text, resume: conv.sessionId, model: conv.model }, (ev: AgentEvent) => {
     switch (ev.type) {
       case 'session':
         patchConversation(id, (c) => ({ ...c, sessionId: ev.sessionId }));

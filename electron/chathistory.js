@@ -129,6 +129,7 @@ function sanitize(raw, prev) {
     updatedAt: Math.max(createdAt, Number(raw.updatedAt) || now),
     sessionId: str(raw.sessionId, 200) || null,
     context: ctx,
+    model: str(raw.model, 200),
     open,
     openOrder: Number(prev && prev.openOrder) || (open ? (openSeq += 1) : 0),
     messages,

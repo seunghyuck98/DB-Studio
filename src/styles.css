@@ -1181,7 +1181,10 @@ body {
 .chat-typing span:nth-child(2) { animation-delay: 0.2s; }
 .chat-typing span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes chat-blink { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
-.chat-input { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--border); align-items: flex-end; }
+.chat-input { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px solid var(--border); }
+.chat-input-row { display: flex; gap: 6px; align-items: flex-end; }
+.chat-model-row { display: flex; align-items: center; gap: 6px; }
+.chat-model { flex: 0 1 auto; max-width: 100%; }
 .chat-input textarea {
   flex: 1; resize: none;
   background: var(--bg-sunken);

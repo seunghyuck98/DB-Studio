@@ -325,6 +325,8 @@ export interface SavedConversation {
   context?: { connectionId: string; database: string; schema: string } | null;
   /** 사이드바에 열려 있는 대화인지 (다음 실행 때 되살린다) */
   open?: boolean;
+  /** 이 대화에 쓰는 모델 id (빈 값이면 기본 모델) */
+  model?: string;
   messages: SavedChatMessage[];
 }
 
@@ -394,6 +396,8 @@ export interface AppSettings {
   splitOnBlankLine: boolean;
   /** Claude 대화 사이드바를 열어 둔 상태인지 */
   chatOpen: boolean;
+  /** 대화에 쓸 모델 id (빈 값이면 기본 모델) */
+  chatModel: string;
   sidebarWidth: number;
   chatWidth: number;
   usageLimits: UsageLimits;
@@ -492,8 +496,10 @@ declare global {
           /** MYSQL_* 접속 정보가 설정 안에 직접 들어 있는지 */
           emrComplete: boolean;
           claudeBin: string;
+          /** 설치된 Claude Code 버전 ("2.1.121"). 못 읽으면 null */
+          claudeVersion: string | null;
         }>;
-        ask(req: { runId: string; prompt: string; resume?: string; apiKey?: string }, onEvent: (ev: AgentEvent) => void): () => void;
+        ask(req: { runId: string; prompt: string; resume?: string; apiKey?: string; model?: string }, onEvent: (ev: AgentEvent) => void): () => void;
         stop(runId: string): void;
       };
       settings: {

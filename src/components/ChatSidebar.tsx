@@ -3,8 +3,9 @@ import { useAppState } from '../state/store';
 import { setChatWidth, persistChatWidth } from '../state/actions';
 import {
   useChatState, activeConversation, newConversation, activateConversation, closeConversation,
-  sendPrompt, stopConversation, loadAgentInfo, type Conversation,
+  sendPrompt, stopConversation, loadAgentInfo, setConversationModel, type Conversation,
 } from '../state/chat';
+import { CHAT_MODELS, modelAvailable } from '../lib/models';
 import { MessageView } from './ChatMessages';
 import { openChatHistoryTab } from './ChatHistoryTab';
 
@@ -15,7 +16,7 @@ import { openChatHistoryTab } from './ChatHistoryTab';
  * (사이드바를 닫아도 남고, electron/agent.js 가 실제 에이전트 루프를 돌린다).
  */
 export default function ChatSidebar({ onClose }: { onClose: () => void }) {
-  const { chatWidth } = useAppState();
+  const { chatWidth, chatModel } = useAppState();
   const chat = useChatState();
   const conv = activeConversation(chat);
   const [dragging, setDragging] = useState(false);
@@ -53,6 +54,10 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
 
   const agent = chat.agent;
   const running = !!conv?.running;
+  // 대화가 아직 없으면 새 대화에 쓸 기본 모델을 보여 준다.
+  const model = conv ? conv.model : chatModel;
+  const cli = chat.agent?.claudeVersion ?? null;
+  const current = CHAT_MODELS.find((m) => m.id === model);
 
   return (
     <aside className="chat-sidebar" style={{ flexBasis: chatWidth, width: chatWidth }}>
@@ -114,6 +119,31 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="chat-input">
+        <div className="chat-model-row">
+          <span className="toolbar-label">모델</span>
+          <select
+            className="select small chat-model"
+            value={model}
+            disabled={running}
+            title={current ? current.hint : model}
+            onChange={(e) => setConversationModel(conv?.id ?? null, e.target.value)}
+          >
+            {CHAT_MODELS.map((m) => {
+              const ok = modelAvailable(m, cli);
+              return (
+                <option key={m.id} value={m.id} disabled={!ok && m.id !== model}>
+                  {m.label}{!ok ? ' — 업데이트 필요' : ''}
+                </option>
+              );
+            })}
+          </select>
+          {current && !modelAvailable(current, cli) && (
+            <span className="chat-warn" title={`이 모델은 Claude Code ${current.minCli} 이상이 필요합니다. 터미널에서 claude update 를 실행하세요 (설치본: ${cli ?? '알 수 없음'}).`}>
+              claude update 필요
+            </span>
+          )}
+        </div>
+        <div className="chat-input-row">
         <textarea
           rows={2}
           placeholder="데이터베이스에 대해 물어보세요… (Enter 로 전송, Shift+Enter 줄바꿈)"
@@ -129,6 +159,7 @@ export default function ChatSidebar({ onClose }: { onClose: () => void }) {
         ) : (
           <button className="btn small primary" onClick={send} disabled={!input.trim()}>보내기</button>
         )}
+        </div>
       </div>
     </aside>
   );

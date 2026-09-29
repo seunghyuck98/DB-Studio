@@ -97,6 +97,7 @@ export default function ChatHistoryTab({ tab: _tab }: { tab: ChatHistoryTabType 
     runId: null,
     mcpDown: false,
     context: c.context ?? undefined,
+    model: c.model ?? "",
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
   });

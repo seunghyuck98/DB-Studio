@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const os = require('os');
 
 /**
@@ -108,6 +109,26 @@ function claudeExecutable() {
   return 'claude';
 }
 
+let cliVersion;
+/**
+ * 설치된 Claude Code 버전 ("2.1.121"). 한 번만 확인하고 기억한다.
+ * 모델에 따라 최소 버전이 있어서, 고를 수 있는 모델을 화면에서 걸러 내는 데 쓴다.
+ */
+function claudeVersion() {
+  if (cliVersion !== undefined) return cliVersion;
+  cliVersion = null;
+  try {
+    const out = execFileSync(claudeExecutable(), ['--version'], {
+      env: richEnv({}), timeout: 8000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const m = /(\d+\.\d+\.\d+)/.exec(out || '');
+    cliVersion = m ? m[1] : null;
+  } catch (_) {
+    /* 버전을 못 읽으면 모델을 막지 않는다 */
+  }
+  return cliVersion;
+}
+
 /** node 18+ 실행 파일이 있는 bin 디렉터리 (Finder 실행 시 PATH 에 nvm 이 없어 필요). */
 function nodeBinDir() {
   const claude = claudeExecutable();
@@ -184,16 +205,19 @@ function status() {
     emrSource: emr ? emr.source : null,
     emrComplete: isCompleteEmrDb(emr),
     claudeBin: claudeExecutable(),
+    claudeVersion: claudeVersion(),
   };
 }
 
 /**
  * 한 번의 사용자 발화를 처리하며, 스트리밍 이벤트를 onEvent 로 흘려보낸다.
- * @param {{ runId:string, prompt:string, resume?:string, apiKey?:string }} req
+ * @param {{ runId:string, prompt:string, resume?:string, apiKey?:string, model?:string }} req
  * @param {(event:object)=>void} onEvent
  */
 async function ask(req, onEvent) {
   const { runId, prompt, resume } = req;
+  // 모델을 고르지 않았으면(빈 값) SDK 기본값을 그대로 쓴다.
+  const model = typeof req.model === 'string' && req.model.trim() ? req.model.trim() : null;
   let sdk;
   try {
     sdk = await loadSdk();
@@ -258,6 +282,7 @@ async function ask(req, onEvent) {
         // 사용자 설정의 MCP(예: dbstudio, jira-wiki)까지 끌려오면 에이전트가 emr-db 대신
         // 엉뚱한 접속을 쓴다. 우리가 넘긴 emr-db 만 쓰도록 파일 MCP 는 무시한다(훅·OTEL 은 유지).
         strictMcpConfig: true,
+        ...(model ? { model } : {}),
         appendSystemPrompt: skillText(),
         includePartialMessages: true,
         maxTurns: 40,

@@ -14,6 +14,8 @@ const DEFAULTS = {
   chatWidth: 380,
   /** Claude 대화 사이드바를 열어 둔 상태인지 (다음 실행에도 유지) */
   chatOpen: false,
+  /** 대화에 쓸 모델 id. 빈 값이면 Claude Code 기본 모델 */
+  chatModel: '',
   /**
    * 토큰 사용량 % 표시의 기준 한도. Anthropic 이 실제 한도를 공개하지 않으므로
    * 사용자가 조절하는 기준값이다 (기본은 넉넉한 어림값).
