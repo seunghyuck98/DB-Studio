@@ -93,20 +93,73 @@ function findEmrDb(obj) {
   return null;
 }
 
-/** SDK 가 실행할 claude 실행 파일 경로를 찾는다 (Node 18+ 필요). */
+/** "2.1.284" 같은 버전 비교. a < b 면 음수. */
+function cmpVersion(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
+ * 이 claude 실행 파일의 버전. 심볼릭 링크를 따라가 패키지의 package.json 을 읽는다
+ * (`--version` 을 띄우는 것보다 빠르고, 후보가 여럿일 때 전부 실행해 볼 필요가 없다).
+ */
+function versionOfCli(bin) {
+  try {
+    let dir = path.dirname(fs.realpathSync(bin));
+    for (let i = 0; i < 3; i += 1) {
+      const pkg = path.join(dir, 'package.json');
+      if (fs.existsSync(pkg)) {
+        const v = JSON.parse(fs.readFileSync(pkg, 'utf8')).version;
+        if (v) return String(v);
+      }
+      dir = path.dirname(dir);
+    }
+  } catch (_) { /* 버전을 못 읽으면 후보에서 빼지 않고 null 로 둔다 */ }
+  return null;
+}
+
+/** 설치돼 있을 만한 claude 실행 파일 후보들. */
+function cliCandidates() {
+  const home = os.homedir();
+  const out = [];
+  const nvm = path.join(home, '.nvm', 'versions', 'node');
+  try {
+    for (const v of fs.readdirSync(nvm)) out.push(path.join(nvm, v, 'bin', 'claude'));
+  } catch (_) { /* nvm 이 없을 수 있다 */ }
+  out.push(
+    path.join(home, '.claude', 'local', 'claude'),
+    path.join(home, '.local', 'bin', 'claude'),
+    '/opt/homebrew/bin/claude',
+    '/usr/local/bin/claude',
+  );
+  return out.filter((p) => { try { return fs.existsSync(p); } catch (_) { return false; } });
+}
+
+let chosenCli;
+/**
+ * SDK 가 실행할 claude 실행 파일.
+ *
+ * **Node 버전이 아니라 Claude Code 버전이 가장 높은 것**을 고른다. nvm 을 여러 개 쓰면
+ * `claude update` 가 PATH 앞쪽(= 꼭 최신 Node 가 아닌) 설치본만 올려서, Node 버전으로 고르면
+ * 업데이트해도 앱은 낡은 CLI 를 계속 쓰게 된다 (새 모델이 400 으로 막힌다).
+ * 요즘 CLI 는 자체 실행 파일이라 어느 nvm 디렉터리에 있든 Node 버전과 상관없이 동작한다.
+ */
 function claudeExecutable() {
   if (process.env.DBSTUDIO_CLAUDE_BIN) return process.env.DBSTUDIO_CLAUDE_BIN;
-  const nvm = path.join(os.homedir(), '.nvm', 'versions', 'node');
-  try {
-    const versions = fs.readdirSync(nvm)
-      .filter((v) => parseInt(String(v).replace(/^v/, ''), 10) >= 18)
-      .sort((a, b) => parseInt(b.replace(/^v/, ''), 10) - parseInt(a.replace(/^v/, ''), 10));
-    for (const v of versions) {
-      const p = path.join(nvm, v, 'bin', 'claude');
-      if (fs.existsSync(p)) return p;
-    }
-  } catch (_) { /* nvm 이 없으면 PATH 에 맡긴다 */ }
-  return 'claude';
+  if (chosenCli !== undefined) return chosenCli;
+  chosenCli = 'claude';
+  let best = null;
+  for (const bin of cliCandidates()) {
+    const v = versionOfCli(bin);
+    if (!best || (v && (!best.v || cmpVersion(v, best.v) > 0))) best = { bin, v };
+  }
+  if (best) chosenCli = best.bin;
+  return chosenCli;
 }
 
 let cliVersion;
@@ -116,9 +169,12 @@ let cliVersion;
  */
 function claudeVersion() {
   if (cliVersion !== undefined) return cliVersion;
-  cliVersion = null;
+  const bin = claudeExecutable();
+  cliVersion = versionOfCli(bin);
+  if (cliVersion) return cliVersion;
+  // package.json 을 못 찾는 설치 형태면 직접 물어본다.
   try {
-    const out = execFileSync(claudeExecutable(), ['--version'], {
+    const out = execFileSync(bin, ['--version'], {
       env: richEnv({}), timeout: 8000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
     });
     const m = /(\d+\.\d+\.\d+)/.exec(out || '');
@@ -131,8 +187,17 @@ function claudeVersion() {
 
 /** node 18+ 실행 파일이 있는 bin 디렉터리 (Finder 실행 시 PATH 에 nvm 이 없어 필요). */
 function nodeBinDir() {
-  const claude = claudeExecutable();
-  if (claude && claude !== 'claude' && fs.existsSync(claude)) return path.dirname(claude);
+  // claude 가 어디 있든(낡은 nvm 디렉터리일 수도 있다) node 는 18+ 로 잡아야 한다.
+  const nvm = path.join(os.homedir(), '.nvm', 'versions', 'node');
+  try {
+    const versions = fs.readdirSync(nvm)
+      .filter((v) => parseInt(String(v).replace(/^v/, ''), 10) >= 18)
+      .sort((a, b) => parseInt(b.replace(/^v/, ''), 10) - parseInt(a.replace(/^v/, ''), 10));
+    for (const v of versions) {
+      const dir = path.join(nvm, v, 'bin');
+      if (fs.existsSync(path.join(dir, 'node'))) return dir;
+    }
+  } catch (_) { /* nvm 이 없으면 아래로 */ }
   for (const p of ['/opt/homebrew/bin', '/usr/local/bin']) {
     if (fs.existsSync(path.join(p, 'node'))) return p;
   }
