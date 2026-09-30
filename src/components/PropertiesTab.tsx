@@ -6,10 +6,11 @@ import { getTabScratch, setTabScratch, notify, sessionOf, getState, openSqlTab }
 import { message } from '../state/actions';
 import type {
   CheckMeta, ColumnChangeSpec, ColumnSpec, ForeignKeyMeta, IndexMeta, KeyMeta,
-  ReferenceMeta, TableColumn, TableGrant, TableMeta, TablePrivileges, TableTab,
+  ReferenceMeta, RoutineMeta, TableColumn, TableGrant, TableMeta,
+  TablePrivileges, TableRoutines, TableTab, TriggerMeta,
 } from '../types';
 
-type Section = 'columns' | 'keys' | 'foreignKeys' | 'references' | 'indexes' | 'privileges' | 'ddl';
+type Section = 'columns' | 'keys' | 'foreignKeys' | 'references' | 'indexes' | 'privileges' | 'routines' | 'ddl';
 
 const SECTIONS: { key: Section; label: string }[] = [
   { key: 'columns', label: '컬럼' },
@@ -18,6 +19,7 @@ const SECTIONS: { key: Section; label: string }[] = [
   { key: 'references', label: '참조' },
   { key: 'indexes', label: '인덱스' },
   { key: 'privileges', label: '권한' },
+  { key: 'routines', label: '함수' },
   { key: 'ddl', label: 'DDL' },
 ];
 
@@ -27,6 +29,15 @@ const SECTIONS: { key: Section; label: string }[] = [
  * 다시 구성한다 (검색 패널 같은 확장 상태가 사라진다). 항상 같은 객체를 넘긴다.
  */
 const BASIC_SETUP = { foldGutter: true, highlightActiveLine: true, autocompletion: true };
+
+/** 찾기 표시줄의 "n / 전체" 개수. 섹션마다 표가 여러 개일 수 있다. */
+function countOf(d: Loaded, section: Section): number {
+  if (section === 'privileges') return d.privileges.grants.length;
+  if (section === 'keys') return d.keys.length + d.checks.length;
+  if (section === 'routines') return d.routines.triggers.length + d.routines.sequences.length + d.routines.routines.length;
+  if (section === 'ddl') return 0;
+  return d[section].length;
+}
 
 /** 행의 값 중 하나라도 검색어를 담고 있는지 (대소문자 무시) */
 function rowMatch(q: string, values: unknown[]): boolean {
@@ -42,6 +53,8 @@ interface Loaded {
   references: ReferenceMeta[];
   indexes: IndexMeta[];
   privileges: TablePrivileges;
+  /** 트리거·시퀀스·함수 (함수 탭) */
+  routines: TableRoutines;
   ddl: string;
   /** 테이블 자체 정보 (엔진·행 추정·크기·주석 등) */
   info: TableMeta | null;
@@ -91,6 +104,11 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
         ...data.privileges,
         grants: data.privileges.grants.filter((g) => rowMatch(q, [g.grantee, g.privilege])),
       },
+      routines: {
+        triggers: data.routines.triggers.filter((t) => rowMatch(q, [t.name, t.timing, t.event, t.statement])),
+        sequences: data.routines.sequences.filter((x) => rowMatch(q, [x.name, x.ownedBy, x.kind])),
+        routines: data.routines.routines.filter((r) => rowMatch(q, [r.name, r.type, r.args, r.returns, r.comment])),
+      },
     };
   }, [data, q]);
 
@@ -99,7 +117,7 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
     setError(null);
     const args = { schema: tab.schema, table: tab.table };
     try {
-      const [columns, keys, checks, foreignKeys, references, indexes, privileges, ddl, tables] = await Promise.all([
+      const [columns, keys, checks, foreignKeys, references, indexes, privileges, routines, ddl, tables] = await Promise.all([
         window.api.meta.get(tab.connectionId, 'columns', args),
         window.api.meta.get(tab.connectionId, 'keys', args),
         window.api.meta.get(tab.connectionId, 'checks', args),
@@ -107,11 +125,12 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
         window.api.meta.get(tab.connectionId, 'references', args),
         window.api.meta.get(tab.connectionId, 'indexes', args),
         window.api.meta.get(tab.connectionId, 'privileges', args),
+        window.api.meta.get(tab.connectionId, 'routines', args),
         window.api.meta.get(tab.connectionId, 'ddl', { ...args, kind: tab.objectKind }),
         window.api.meta.get(tab.connectionId, 'tables', { schema: tab.schema }),
       ]);
       const info = (tables as TableMeta[]).find((t) => t.name === tab.table) ?? null;
-      setData({ columns, keys, checks, foreignKeys, references, indexes, privileges, ddl, info });
+      setData({ columns, keys, checks, foreignKeys, references, indexes, privileges, routines, ddl, info });
     } catch (e) {
       setError(message(e));
     } finally {
@@ -157,13 +176,9 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
           />
           {q && view && (
             <span className="hint">
-              {section === 'privileges' ? view.privileges.grants.length
-                : section === 'keys' ? view.keys.length + view.checks.length
-                : view[section].length}
+              {countOf(view, section)}
               {' / '}
-              {section === 'privileges' ? data.privileges.grants.length
-                : section === 'keys' ? data.keys.length + data.checks.length
-                : data[section].length}
+              {countOf(data, section)}
             </span>
           )}
           <button className="icon-btn" aria-label="찾기 닫기" onClick={closeFind}>×</button>
@@ -187,6 +202,7 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
             <IndexesPanel tab={tab} rows={view.indexes} keys={data!.keys} foreignKeys={data!.foreignKeys} onChanged={load} />
           )}
           {section === 'privileges' && <PrivilegesTable data={view.privileges} />}
+          {section === 'routines' && <RoutinesPanel tab={tab} data={view.routines} />}
           {section === 'ddl' && <DdlPanel tab={tab} ddl={view.ddl} onChanged={load} />}
         </div>
       )}
@@ -196,6 +212,159 @@ export default function PropertiesTab({ tab }: { tab: TableTab }) {
 
 function Empty({ what }: { what: string }) {
   return <div className="pane-message muted">{what}이(가) 없습니다.</div>;
+}
+
+/**
+ * 함수 탭 — 이 테이블의 트리거, 스키마의 시퀀스, 스키마의 함수·프로시저.
+ *
+ * 트리거는 테이블에 딸린 것이라 그대로 보여 주고, 시퀀스·함수는 스키마 단위라
+ * 기본은 **이 테이블과 엮인 것만** 보여 준다 (`전체` 를 켜면 스키마 전체).
+ * 함수 본문은 목록에 없고, 행을 누르면 그때 읽어 온다.
+ */
+function RoutinesPanel({ tab, data }: { tab: TableTab; data: TableRoutines }) {
+  const [all, setAll] = useState(false);
+  const [openDef, setOpenDef] = useState<{ key: string; title: string; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const sequences = all ? data.sequences : data.sequences.filter((s) => s.related);
+  const routines = all ? data.routines : data.routines.filter((r) => r.related);
+  const hiddenSeq = data.sequences.length - sequences.length;
+  const hiddenRoutines = data.routines.length - routines.length;
+
+  const showTrigger = (t: TriggerMeta) => {
+    const key = `trg:${t.name}`;
+    setOpenDef((cur) => (cur?.key === key ? null : { key, title: t.name, text: t.statement || '(정의를 읽을 수 없습니다)' }));
+  };
+
+  const showRoutine = async (r: RoutineMeta) => {
+    const key = `fn:${r.name}:${r.args}`;
+    if (openDef?.key === key) { setOpenDef(null); return; }
+    setBusy(true);
+    try {
+      const text: string = await window.api.meta.get(tab.connectionId, 'routineDef', {
+        schema: tab.schema, name: r.name, kind: r.type, args: r.args,
+      });
+      setOpenDef({ key, title: `${r.name}(${r.args})`, text: text || '(정의를 읽을 수 없습니다 — 권한을 확인하세요)' });
+    } catch (e) {
+      notify('error', message(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const empty = !data.triggers.length && !data.sequences.length && !data.routines.length;
+  if (empty) return <Empty what="트리거·시퀀스·함수" />;
+
+  return (
+    <div className="routines-panel">
+      <div className="routines-bar">
+        <label className="check small" title="끄면 이 테이블과 엮인 시퀀스·함수만 보여 줍니다">
+          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
+          스키마 전체 보기
+        </label>
+        <div className="spacer" />
+        <span className="hint">
+          트리거 {data.triggers.length} · 시퀀스 {sequences.length}
+          {hiddenSeq > 0 ? ` (+${hiddenSeq})` : ''} · 함수 {routines.length}
+          {hiddenRoutines > 0 ? ` (+${hiddenRoutines})` : ''}
+        </span>
+      </div>
+
+      <div className="routines-group">
+        <div className="routines-title">트리거 <span className="hint">이 테이블에 걸린 것</span></div>
+        {data.triggers.length === 0 ? <div className="pane-message muted">트리거가 없습니다.</div> : (
+          <table className="meta-table">
+            <thead><tr><th>이름</th><th>시점</th><th>이벤트</th><th>단위</th><th>사용</th><th>정의</th></tr></thead>
+            <tbody>
+              {data.triggers.map((t) => (
+                <tr key={t.name} className={openDef?.key === `trg:${t.name}` ? 'row-selected' : ''} onClick={() => showTrigger(t)}>
+                  <td className="nowrap">{t.name}</td>
+                  <td className="nowrap">{t.timing}</td>
+                  <td className="nowrap">{t.event}</td>
+                  <td className="nowrap">{t.orientation}</td>
+                  <td className="nowrap">{t.enabled ? '예' : '아니오'}</td>
+                  <td className="mono sql-cell">{oneLine(t.statement)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="routines-group">
+        <div className="routines-title">시퀀스 <span className="hint">MySQL 은 AUTO_INCREMENT 도 함께</span></div>
+        {sequences.length === 0 ? <div className="pane-message muted">시퀀스가 없습니다.</div> : (
+          <table className="meta-table">
+            <thead><tr><th>이름</th><th>종류</th><th>컬럼</th><th>현재값</th><th>시작</th><th>증가</th><th>범위</th><th>순환</th></tr></thead>
+            <tbody>
+              {sequences.map((x) => (
+                <tr key={`${x.kind}:${x.name}`} className={x.related ? 'row-related' : ''}>
+                  <td className="nowrap">{x.name}</td>
+                  <td className="nowrap">{x.kind === 'auto_increment' ? 'AUTO_INCREMENT' : '시퀀스'}</td>
+                  <td className="nowrap">{x.ownedBy ?? ''}</td>
+                  <td className="num">{x.lastValue ?? ''}</td>
+                  <td className="num">{x.startValue ?? ''}</td>
+                  <td className="num">{x.increment ?? ''}</td>
+                  <td className="nowrap">{x.minValue != null && x.maxValue != null ? `${x.minValue} ~ ${x.maxValue}` : ''}</td>
+                  <td className="nowrap">{x.cycle ? '예' : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="routines-group">
+        <div className="routines-title">
+          함수 · 프로시저 <span className="hint">행을 누르면 정의를 읽어 옵니다{busy ? ' — 읽는 중…' : ''}</span>
+        </div>
+        {routines.length === 0 ? <div className="pane-message muted">함수·프로시저가 없습니다.</div> : (
+          <table className="meta-table">
+            <thead><tr><th>이름</th><th>종류</th><th>인자</th><th>반환</th><th>언어</th><th>설명</th></tr></thead>
+            <tbody>
+              {routines.map((r) => (
+                <tr
+                  key={`${r.name}:${r.args}`}
+                  className={`${r.related ? 'row-related' : ''} ${openDef?.key === `fn:${r.name}:${r.args}` ? 'row-selected' : ''}`}
+                  onClick={() => void showRoutine(r)}
+                >
+                  <td className="nowrap">{r.name}</td>
+                  <td className="nowrap">{r.type}</td>
+                  <td className="mono sql-cell">{r.args}</td>
+                  <td className="nowrap">{r.returns}</td>
+                  <td className="nowrap">{r.language}</td>
+                  <td className="sql-cell">{r.comment}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {openDef && (
+        <div className="routines-def">
+          <div className="history-detail-head">
+            <b>{openDef.title}</b>
+            <div className="spacer" />
+            <button className="btn small" onClick={() => void navigator.clipboard.writeText(openDef.text)}>복사</button>
+            <button
+              className="btn small"
+              onClick={() => openSqlTab(tab.connectionId, tab.database, tab.schema, openDef.text)}
+              title="새 SQL 편집기에서 열기"
+            >
+              편집기에서 열기
+            </button>
+            <button className="icon-btn" aria-label="닫기" onClick={() => setOpenDef(null)}>×</button>
+          </div>
+          <pre className="code-block">{openDef.text}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function oneLine(text: string): string {
+  return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 300);
 }
 
 // ---- 컬럼 (조회 + 편집) -------------------------------------------------------

@@ -3,6 +3,12 @@
 const { Client } = require('pg');
 const { likePattern } = require('./searchutil');
 
+/** 함수 탭에서 한 번에 읽어 올 상한 (스키마에 루틴이 많아도 화면이 버티게) */
+const MAX_ROUTINES = 500;
+const MAX_SEQUENCES = 200;
+/** 트리거 본문처럼 목록에 실어 보내는 정의의 길이 상한 */
+const MAX_DEF = 20000;
+
 /**
  * PostgreSQL 드라이버.
  * 하나의 클라이언트는 하나의 데이터베이스에 묶이므로, 데이터베이스 전환은 재접속으로 처리한다.
@@ -401,6 +407,174 @@ class PostgresDriver {
         .join('\n');
     }
     return ddl;
+  }
+
+  // ---- 함수·트리거·시퀀스 ----------------------------------------------------
+
+  /**
+   * 이 테이블의 트리거, 스키마의 시퀀스(이 테이블이 쓰는 것은 related), 스키마의 함수·프로시저.
+   * 함수 본문은 목록에 싣지 않고, 눌렀을 때 getRoutineDef 로 따로 읽는다.
+   */
+  async listRoutines(schema, table) {
+    const like = likePattern(table || '');
+
+    const triggers = (await this.rows(
+      `SELECT t.tgname AS name, c.relname AS "tableName",
+              pg_get_triggerdef(t.oid) AS statement,
+              CASE WHEN (t.tgtype & 2) <> 0 THEN 'BEFORE'
+                   WHEN (t.tgtype & 64) <> 0 THEN 'INSTEAD OF' ELSE 'AFTER' END AS timing,
+              array_to_string(ARRAY[
+                CASE WHEN (t.tgtype & 4) <> 0 THEN 'INSERT' END,
+                CASE WHEN (t.tgtype & 8) <> 0 THEN 'DELETE' END,
+                CASE WHEN (t.tgtype & 16) <> 0 THEN 'UPDATE' END,
+                CASE WHEN (t.tgtype & 32) <> 0 THEN 'TRUNCATE' END], '/') AS event,
+              CASE WHEN (t.tgtype & 1) <> 0 THEN 'ROW' ELSE 'STATEMENT' END AS orientation,
+              t.tgenabled <> 'D' AS enabled
+         FROM pg_trigger t
+         JOIN pg_class c ON c.oid = t.tgrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND c.relname = $2 AND NOT t.tgisinternal
+        ORDER BY t.tgname`,
+      [schema, table],
+    )).map((x) => ({
+      name: x.name,
+      timing: x.timing || '',
+      event: x.event || '',
+      table: x.tableName || table,
+      orientation: x.orientation || '',
+      statement: String(x.statement || '').slice(0, MAX_DEF),
+      enabled: !!x.enabled,
+      createdAt: null,
+    }));
+
+    let sequences = [];
+    try {
+      // pg_sequences 는 PG10+. 없으면 아래 catch 에서 이름·소유 컬럼만 채운다.
+      sequences = (await this.rows(
+        `SELECT s.relname AS name, t.relname AS "ownerTable", a.attname AS "ownedBy",
+                q.data_type::text AS "dataType", q.start_value, q.min_value, q.max_value,
+                q.increment_by, q.cycle, q.last_value
+           FROM pg_class s
+           JOIN pg_namespace ns ON ns.oid = s.relnamespace
+           LEFT JOIN pg_depend d ON d.classid = 'pg_class'::regclass AND d.objid = s.oid
+                 AND d.refclassid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
+           LEFT JOIN pg_class t ON t.oid = d.refobjid
+           LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid
+           LEFT JOIN pg_sequences q ON q.schemaname = ns.nspname AND q.sequencename = s.relname
+          WHERE s.relkind = 'S' AND ns.nspname = $1
+          ORDER BY s.relname
+          LIMIT ${MAX_SEQUENCES}`,
+        [schema],
+      )).map((x) => ({
+        name: x.name, kind: 'sequence', ownedBy: x.ownedBy || null,
+        related: x.ownerTable === table,
+        lastValue: x.last_value == null ? null : String(x.last_value),
+        startValue: x.start_value == null ? null : String(x.start_value),
+        increment: x.increment_by == null ? null : String(x.increment_by),
+        minValue: x.min_value == null ? null : String(x.min_value),
+        maxValue: x.max_value == null ? null : String(x.max_value),
+        cycle: !!x.cycle,
+        dataType: x.dataType || null,
+      }));
+    } catch (_) {
+      try {
+        sequences = (await this.rows(
+          `SELECT s.relname AS name, t.relname AS "ownerTable", a.attname AS "ownedBy"
+             FROM pg_class s
+             JOIN pg_namespace ns ON ns.oid = s.relnamespace
+             LEFT JOIN pg_depend d ON d.classid = 'pg_class'::regclass AND d.objid = s.oid
+                   AND d.refclassid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
+             LEFT JOIN pg_class t ON t.oid = d.refobjid
+             LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid
+            WHERE s.relkind = 'S' AND ns.nspname = $1
+            ORDER BY s.relname LIMIT ${MAX_SEQUENCES}`,
+          [schema],
+        )).map((x) => ({
+          name: x.name, kind: 'sequence', ownedBy: x.ownedBy || null, related: x.ownerTable === table,
+          lastValue: null, startValue: null, increment: null, minValue: null, maxValue: null,
+          cycle: false, dataType: null,
+        }));
+      } catch (_) { /* 시퀀스를 못 읽어도 나머지는 보여 준다 */ }
+    }
+
+    let routines = [];
+    const mapRoutine = (x) => ({
+      name: x.name,
+      type: String(x.type || 'FUNCTION').toUpperCase(),
+      args: x.args || '',
+      returns: x.returns || '',
+      language: x.language || '',
+      comment: x.comment || '',
+      related: !!x.related,
+      createdAt: null,
+      alteredAt: null,
+    });
+    try {
+      routines = (await this.rows(
+        `SELECT p.proname AS name,
+                CASE p.prokind WHEN 'p' THEN 'PROCEDURE' WHEN 'a' THEN 'AGGREGATE'
+                               WHEN 'w' THEN 'WINDOW' ELSE 'FUNCTION' END AS type,
+                pg_get_function_identity_arguments(p.oid) AS args,
+                pg_get_function_result(p.oid) AS returns,
+                l.lanname AS language,
+                obj_description(p.oid, 'pg_proc') AS comment,
+                (p.prosrc ILIKE $2) AS related
+           FROM pg_proc p
+           JOIN pg_namespace n ON n.oid = p.pronamespace
+           LEFT JOIN pg_language l ON l.oid = p.prolang
+          WHERE n.nspname = $1
+          ORDER BY p.proname
+          LIMIT ${MAX_ROUTINES}`,
+        [schema, like],
+      )).map(mapRoutine);
+    } catch (_) {
+      // prokind 는 PG11+. 그 전 버전은 proisagg/proiswindow 를 쓴다.
+      routines = (await this.rows(
+        `SELECT p.proname AS name,
+                CASE WHEN p.proisagg THEN 'AGGREGATE' WHEN p.proiswindow THEN 'WINDOW'
+                     ELSE 'FUNCTION' END AS type,
+                pg_get_function_identity_arguments(p.oid) AS args,
+                pg_get_function_result(p.oid) AS returns,
+                l.lanname AS language,
+                obj_description(p.oid, 'pg_proc') AS comment,
+                (p.prosrc ILIKE $2) AS related
+           FROM pg_proc p
+           JOIN pg_namespace n ON n.oid = p.pronamespace
+           LEFT JOIN pg_language l ON l.oid = p.prolang
+          WHERE n.nspname = $1
+          ORDER BY p.proname LIMIT ${MAX_ROUTINES}`,
+        [schema, like],
+      )).map(mapRoutine);
+    }
+
+    return { triggers, sequences, routines };
+  }
+
+  /**
+   * 함수·프로시저의 정의. 같은 이름이 여러 개(오버로드)일 수 있어 인자 목록으로 특정한다.
+   */
+  async getRoutineDef(schema, name, _type, args = '') {
+    try {
+      // regprocedure 는 인자 '이름'을 못 읽는다 ("p_status character" 는 구문 오류).
+      // 그래서 identity 인자 문자열을 그대로 비교해 pg_proc 에서 찾는다 (오버로드 구분).
+      const r = await this.rows(
+        `SELECT pg_get_functiondef(p.oid) AS d
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = $1 AND p.proname = $2
+            AND ($3 = '' OR pg_get_function_identity_arguments(p.oid) = $3)
+          ORDER BY p.oid LIMIT 1`,
+        [schema, name, args || ''],
+      );
+      if (r[0] && r[0].d) return r[0].d;
+      throw new Error('정의 없음');
+    } catch (_) {
+      const r = await this.rows(
+        `SELECT p.prosrc AS d FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = $1 AND p.proname = $2 LIMIT 1`,
+        [schema, name],
+      );
+      return (r[0] && r[0].d) || '';
+    }
   }
 
   // ---- 객체 검색 -------------------------------------------------------------

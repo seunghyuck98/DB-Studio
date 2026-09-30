@@ -1049,6 +1049,28 @@ body {
 .usage-value { font-size: 12px; font-weight: 600; }
 .usage-sep { width: 1px; align-self: stretch; margin: 2px 0; background: var(--border); }
 
+/* ---- 함수 탭 (트리거·시퀀스·함수) ---- */
+.routines-panel { display: flex; flex-direction: column; min-height: 0; overflow: auto; flex: 1; }
+.routines-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-bottom: 1px solid var(--border-soft);
+  position: sticky; top: 0; background: var(--bg); z-index: 1;
+}
+.routines-group { padding: 4px 0 10px; }
+.routines-title {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 8px 10px 4px; font-size: 12px; font-weight: 600; color: var(--text-dim);
+}
+.routines-panel .meta-table tbody tr { cursor: default; }
+.routines-panel .sql-cell { max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 이 테이블과 엮인 행을 살짝 띄워 준다 */
+.routines-panel .row-related td:first-child { border-left: 2px solid var(--accent); }
+.routines-def {
+  border-top: 1px solid var(--border);
+  padding: 8px 10px; background: var(--bg-sunken);
+}
+.routines-def .code-block { max-height: 320px; overflow: auto; margin: 6px 0 0; }
+
 /* ---- Claude 대화 사이드바 ---- */
 .chat-sidebar {
   flex: 0 0 auto;

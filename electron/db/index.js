@@ -435,6 +435,8 @@ function metaOn(s, action, args) {
     case 'ddl': return d.getDDL(args.schema, args.table, args.kind);
     case 'privileges': return d.listPrivileges(args.schema, args.table);
     case 'checks': return d.listChecks(args.schema, args.table);
+    case 'routines': return d.listRoutines(args.schema, args.table);
+    case 'routineDef': return d.getRoutineDef(args.schema, args.name, args.kind, args.args);
     default: throw new Error(`알 수 없는 메타데이터 요청: ${action}`);
   }
 }

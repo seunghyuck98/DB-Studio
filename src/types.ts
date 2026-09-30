@@ -139,6 +139,58 @@ export interface ReferenceMeta {
   referencedColumns: string[];
 }
 
+/** 테이블에 걸린 트리거 */
+export interface TriggerMeta {
+  name: string;
+  /** BEFORE / AFTER / INSTEAD OF */
+  timing: string;
+  /** INSERT / UPDATE / DELETE (PostgreSQL 은 '/' 로 여러 개) */
+  event: string;
+  table: string;
+  /** ROW / STATEMENT */
+  orientation: string;
+  statement: string;
+  enabled: boolean;
+  createdAt: string | null;
+}
+
+/** 시퀀스 (MySQL 은 AUTO_INCREMENT 를 같은 자리에 보여 준다) */
+export interface SequenceMeta {
+  name: string;
+  kind: 'sequence' | 'auto_increment';
+  /** 이 시퀀스를 쓰는 컬럼 (없으면 null) */
+  ownedBy: string | null;
+  /** 이 테이블과 엮인 것인지 */
+  related: boolean;
+  lastValue: string | null;
+  startValue: string | null;
+  increment: string | null;
+  minValue: string | null;
+  maxValue: string | null;
+  cycle: boolean;
+  dataType: string | null;
+}
+
+/** 스키마의 함수·프로시저 (본문은 목록에 없고, 고르면 따로 읽는다) */
+export interface RoutineMeta {
+  name: string;
+  type: string;
+  args: string;
+  returns: string;
+  language: string;
+  comment: string;
+  /** 본문이 이 테이블 이름을 담고 있는지 */
+  related: boolean;
+  createdAt: string | null;
+  alteredAt: string | null;
+}
+
+export interface TableRoutines {
+  triggers: TriggerMeta[];
+  sequences: SequenceMeta[];
+  routines: RoutineMeta[];
+}
+
 export interface IndexMeta {
   name: string;
   unique: boolean;

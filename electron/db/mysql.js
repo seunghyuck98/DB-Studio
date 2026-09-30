@@ -3,6 +3,12 @@
 const mysql = require('mysql2/promise');
 const { likePattern } = require('./searchutil');
 
+/** 함수 탭에서 한 번에 읽어 올 상한 (스키마에 루틴이 많아도 화면이 버티게) */
+const MAX_ROUTINES = 500;
+const MAX_SEQUENCES = 200;
+/** 트리거 본문처럼 목록에 실어 보내는 정의의 길이 상한 */
+const MAX_DEF = 20000;
+
 let TYPE_NAMES = null;
 function typeName(code) {
   if (!TYPE_NAMES) {
@@ -319,6 +325,121 @@ class MySqlDriver {
     const r = await this.rows(`SHOW CREATE ${kind === 'view' ? 'VIEW' : 'TABLE'} ${this.qualify(schema, table)}`);
     const row = r[0] || {};
     return row['Create Table'] || row['Create View'] || '';
+  }
+
+  // ---- 함수·트리거·시퀀스 ----------------------------------------------------
+
+  /**
+   * 이 테이블에 걸린 트리거, 스키마의 시퀀스, 스키마의 함수·프로시저를 한 번에 모은다.
+   * 함수 본문은 목록에 싣지 않는다 (스키마에 루틴이 많으면 무거워진다).
+   * 대신 이 테이블 이름을 본문에 담고 있으면 related 로 표시하고, 본문은 눌렀을 때 따로 읽는다.
+   */
+  async listRoutines(schema, table) {
+    const like = likePattern(table || '');
+
+    const triggers = (await this.rows(
+      `SELECT trigger_name AS name, action_timing AS timing, event_manipulation AS event,
+              event_object_table AS tableName, action_orientation AS orientation,
+              action_statement AS statement, created
+         FROM information_schema.triggers
+        WHERE trigger_schema = ? AND event_object_table = ?
+        ORDER BY action_timing, event_manipulation, trigger_name`,
+      [schema, table],
+    )).map((x) => ({
+      name: x.name,
+      timing: x.timing || '',
+      event: x.event || '',
+      table: x.tableName || table,
+      orientation: x.orientation || '',
+      statement: String(x.statement || '').slice(0, MAX_DEF),
+      enabled: true,
+      createdAt: x.created ? String(x.created) : null,
+    }));
+
+    const sequences = [];
+    // 이 테이블의 AUTO_INCREMENT — MySQL 에서 시퀀스에 해당하는 것.
+    const auto = await this.rows(
+      `SELECT c.column_name AS col, t.auto_increment AS next
+         FROM information_schema.columns c
+         JOIN information_schema.tables t
+           ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+        WHERE c.table_schema = ? AND c.table_name = ? AND c.extra LIKE '%auto_increment%'`,
+      [schema, table],
+    );
+    for (const x of auto) {
+      sequences.push({
+        name: `${table}.${x.col}`, kind: 'auto_increment', ownedBy: x.col, related: true,
+        lastValue: x.next == null ? null : String(x.next),
+        startValue: null, increment: '1', minValue: null, maxValue: null, cycle: false, dataType: null,
+      });
+    }
+    // MariaDB 10.3+ 의 CREATE SEQUENCE 객체 (MySQL 에는 없어서 그냥 비어 있다).
+    try {
+      const seqs = await this.rows(
+        `SELECT table_name AS name FROM information_schema.tables
+          WHERE table_schema = ? AND table_type = 'SEQUENCE' ORDER BY table_name`,
+        [schema],
+      );
+      for (const s of seqs.slice(0, MAX_SEQUENCES)) {
+        let d = {};
+        try {
+          const r = await this.rows(`SELECT * FROM ${this.qualify(schema, s.name)}`);
+          d = r[0] || {};
+        } catch (_) { /* 권한이 없으면 이름만 */ }
+        sequences.push({
+          name: s.name, kind: 'sequence', ownedBy: null, related: false,
+          lastValue: d.next_not_cached_value == null ? null : String(d.next_not_cached_value),
+          startValue: d.start_value == null ? null : String(d.start_value),
+          increment: d.increment == null ? null : String(d.increment),
+          minValue: d.minimum_value == null ? null : String(d.minimum_value),
+          maxValue: d.maximum_value == null ? null : String(d.maximum_value),
+          cycle: !!Number(d.cycle_option),
+          dataType: null,
+        });
+      }
+    } catch (_) { /* SEQUENCE 를 모르는 서버 */ }
+
+    // 스키마의 함수·프로시저. routine_definition 은 권한이 없으면 NULL 이라 related 가 0 이 된다.
+    const routines = (await this.rows(
+      `SELECT routine_name AS name, routine_type AS type, dtd_identifier AS returns,
+              routine_comment AS comment, created, last_altered AS altered,
+              (routine_definition LIKE ? ESCAPE '\\\\') AS related
+         FROM information_schema.routines
+        WHERE routine_schema = ?
+        ORDER BY routine_type, routine_name
+        LIMIT ${MAX_ROUTINES}`,
+      [like, schema],
+    )).map((x) => ({
+      name: x.name,
+      type: String(x.type || 'FUNCTION').toUpperCase(),
+      args: '',
+      returns: x.returns || '',
+      language: 'SQL',
+      comment: x.comment || '',
+      related: !!Number(x.related),
+      createdAt: x.created ? String(x.created) : null,
+      alteredAt: x.altered ? String(x.altered) : null,
+    }));
+
+    return { triggers, sequences, routines };
+  }
+
+  /** 함수·프로시저의 정의 (목록에서 고른 것만 읽는다). */
+  async getRoutineDef(schema, name, type) {
+    const what = String(type).toUpperCase() === 'PROCEDURE' ? 'PROCEDURE' : 'FUNCTION';
+    try {
+      const r = await this.rows(`SHOW CREATE ${what} ${this.qualify(schema, name)}`);
+      const row = r[0] || {};
+      return row[`Create ${what === 'PROCEDURE' ? 'Procedure' : 'Function'}`] || '';
+    } catch (e) {
+      // 본문을 볼 권한이 없을 수 있다. 그때는 information_schema 로 한 번 더.
+      const r = await this.rows(
+        `SELECT routine_definition AS d FROM information_schema.routines
+          WHERE routine_schema = ? AND routine_name = ? AND routine_type = ?`,
+        [schema, name, what],
+      );
+      return (r[0] && r[0].d) || '';
+    }
   }
 
   // ---- 객체 검색 -------------------------------------------------------------
