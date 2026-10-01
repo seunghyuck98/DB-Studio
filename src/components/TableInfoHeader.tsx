@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { copyText } from '../lib/clipboard';
 import type { TableMeta, TablePrivileges, TableTab } from '../types';
 
 function fmtBytes(n: number): string {
@@ -60,15 +61,20 @@ export default function TableInfoHeader({ tab }: { tab: TableTab }) {
   if (info.sizeBytes) items.push({ label: '크기', value: fmtBytes(info.sizeBytes) });
   if (info.collation) items.push({ label: '정렬', value: info.collation });
 
+  const qualified = `${tab.schema}.${tab.table}`;
   const tooltip = [
-    `${tab.schema}.${tab.table} (${info.kind === 'view' ? '뷰' : '테이블'})`,
+    `${qualified} (${info.kind === 'view' ? '뷰' : '테이블'}) — 더블클릭하면 이름이 복사됩니다`,
     info.comment ? `주석: ${info.comment}` : null,
     info.createdAt ? `생성: ${fmtDate(info.createdAt)}` : null,
     info.updatedAt ? `변경: ${fmtDate(info.updatedAt)}` : null,
   ].filter(Boolean).join('\n');
 
   return (
-    <div className="table-info-head" title={tooltip}>
+    <div
+      className="table-info-head copyable"
+      title={tooltip}
+      onDoubleClick={() => void copyText(qualified, '이름')}
+    >
       {info.comment && <span className="props-info-comment">{info.comment}</span>}
       {items.map((it) => (
         <span key={it.label} className="props-info-item">

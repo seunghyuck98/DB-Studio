@@ -237,6 +237,7 @@ body {
   color: var(--text-dim);
 }
 .crumb { display: inline-flex; align-items: center; gap: 5px; }
+.crumb-name { display: inline-flex; align-items: center; gap: 5px; padding: 1px 4px; margin: -1px -2px; }
 .crumb-sep { color: var(--text-faint); margin: 0 3px; }
 .crumb:last-child .crumb-label { color: var(--text); font-weight: 600; }
 
@@ -1048,6 +1049,10 @@ body {
 .usage-label { color: var(--text-faint); font-size: 9.5px; }
 .usage-value { font-size: 12px; font-weight: 600; }
 .usage-sep { width: 1px; align-self: stretch; margin: 2px 0; background: var(--border); }
+
+/* 더블클릭하면 복사되는 이름 (앱 전체가 텍스트 선택을 막아 둬서 필요하다) */
+.copyable { cursor: copy; border-radius: 3px; }
+.copyable:hover { background: var(--row-hover); }
 
 /* ---- 함수 탭 (트리거·시퀀스·함수) ---- */
 .routines-panel { display: flex; flex-direction: column; min-height: 0; overflow: auto; flex: 1; }

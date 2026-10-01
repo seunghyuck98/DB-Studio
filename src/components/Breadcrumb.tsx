@@ -1,9 +1,13 @@
 import { useAppState, connectionOf, sessionOf } from '../state/store';
+import { copyText } from '../lib/clipboard';
 import type { Tab } from '../types';
 
 /**
  * 현재 열려 있는 객체의 위치를 "접속 > DB > 스키마 > 테이블" 형태로 보여준다.
  * MySQL 처럼 스키마 계층이 없는 DB 에서는 스키마 구간을 생략한다.
+ *
+ * 각 조각은 **더블클릭하면 그 이름이 복사된다** — 앱 전체가 텍스트 선택을 막아 두어
+ * 테이블 이름을 끌어서 복사할 수 없기 때문이다.
  */
 export default function Breadcrumb({ tab }: { tab: Tab | null }) {
   const state = useAppState();
@@ -14,7 +18,11 @@ export default function Breadcrumb({ tab }: { tab: Tab | null }) {
     const icon = tab.kind === 'tx' ? 'tx' : tab.kind === 'chatHistory' ? 'chat' : 'history';
     return (
       <nav className="breadcrumb" aria-label="현재 위치">
-        <span className="crumb">
+        <span
+          className="crumb copyable"
+          title={`${tab.title} — 더블클릭하면 복사합니다`}
+          onDoubleClick={() => void copyText(tab.title, '복사')}
+        >
           <span className={`icon icon-${icon}`} aria-hidden />
           <span className="crumb-label">{tab.title}</span>
         </span>
@@ -44,8 +52,14 @@ export default function Breadcrumb({ tab }: { tab: Tab | null }) {
       {parts.map((p, i) => (
         <span key={i} className="crumb">
           {i > 0 && <span className="crumb-sep">›</span>}
-          <span className={`icon icon-${p.kind}`} aria-hidden />
-          <span className="crumb-label">{p.label}</span>
+          <span
+            className="crumb-name copyable"
+            title={`${p.label} — 더블클릭하면 복사합니다`}
+            onDoubleClick={() => void copyText(p.label, '복사')}
+          >
+            <span className={`icon icon-${p.kind}`} aria-hidden />
+            <span className="crumb-label">{p.label}</span>
+          </span>
         </span>
       ))}
     </nav>

@@ -9,6 +9,7 @@ import {
   type TreeItem, type AppState, closeTab, getState, notify,
 } from '../state/store';
 import { connect, disconnect, reconnect, deleteConnection, toggleNode, refreshNode, runSearch, nodeId } from '../state/actions';
+import { copyText } from '../lib/clipboard';
 import type { ConnectionConfig, SearchScopes } from '../types';
 
 const SCOPE_LABELS: { key: keyof SearchScopes; label: string; hint: string }[] = [
@@ -349,6 +350,15 @@ function ItemRow({ item, state, filter, onMenu, hooks, depth }: RowProps & { ite
         ),
       });
       items.push({
+        label: '이름 복사',
+        separated: true,
+        action: () => void copyText(item.table!, item.type === 'view' ? '뷰 이름' : '테이블 이름'),
+      });
+      items.push({
+        label: '스키마.테이블 복사',
+        action: () => void copyText(`${item.schema}.${item.table}`, '이름'),
+      });
+      items.push({
         label: item.type === 'view' ? '뷰 삭제…' : '테이블 삭제…',
         danger: true,
         separated: true,
@@ -406,6 +416,11 @@ function ItemRow({ item, state, filter, onMenu, hooks, depth }: RowProps & { ite
         items.push({
           label: 'SQL 편집기 열기',
           action: () => openSqlTab(item.connectionId, item.database!, item.schema ?? item.database!),
+        });
+        items.push({
+          label: '이름 복사',
+          separated: true,
+          action: () => void copyText(item.schema ?? item.database!, item.type === 'schema' ? '스키마 이름' : '데이터베이스 이름'),
         });
       }
     }
